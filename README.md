@@ -1,3 +1,30 @@
+<!-- ============================================================= -->
+<!-- InformaTech — fork de RustDesk pour la télémaintenance       -->
+<!-- ============================================================= -->
+
+> # InformaTech Assistance — fork de RustDesk
+>
+> Ce dépôt est un **fork de [RustDesk](https://github.com/rustdesk/rustdesk)** (tag `1.5.0`),
+> maintenu par **InformaTech** (dépannage informatique) pour l'outil de
+> télémaintenance intégré à son hub. RustDesk et ce fork sont sous licence
+> **AGPL-3.0** : le code source complet de ce qui est distribué (y compris nos
+> modifications) est public dans ce dépôt, conformément à la licence.
+>
+> **Ce que nous changeons** (tout est regroupé et commenté dans
+> `src/common.rs`, fonction `apply_informatech_defaults`, et dans
+> `.github/workflows/informatech-release.yml`) :
+> - nom d'application `InformaTech` (active le mode « client personnalisé ») ;
+> - sur le poste contrôlé, l'icône de zone de notification et la fenêtre de
+>   connexion natives de RustDesk sont masquées : c'est le **hub InformaTech**
+>   qui affiche à la place une bannière « InformaTech est connecté » avec un
+>   bouton **Couper**. Le consentement et le contrôle de l'utilisateur restent
+>   donc visibles, simplement portés par l'interface du hub ;
+> - icônes et métadonnées à la marque InformaTech ;
+> - un workflow GitHub Actions qui ne compile que Windows x64.
+>
+> Les serveurs publics de RustDesk sont inchangés. Cet outil est destiné à des
+> interventions **autorisées** sur les postes de clients d'InformaTech.
+
 <p align="center">
   <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
   <a href="#raw-steps-to-build">Build</a> •
