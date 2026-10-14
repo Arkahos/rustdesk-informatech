@@ -89,10 +89,12 @@ Config (format TOML, nommé d'après `APP_NAME` = `InformaTech`) :
 | Service (SYSTEM) | `C:\Windows\System32\config\systemprofile\AppData\Roaming\InformaTech\config\` |
 | Utilisateur courant | `%APPDATA%\InformaTech\config\` |
 
-Fichiers principaux : `InformaTech.toml` (identité/clé, dont l'**ID**),
-`InformaTech2.toml` (options). Le mot de passe permanent y est stocké chiffré.
+Fichiers principaux : `InformaTech.toml` (identité/clé, dont l'**ID** en
+`enc_id`), `InformaTech2.toml` (options). Le mot de passe permanent y est stocké
+chiffré. *(Vérifié : un `--get-id` en portable crée bien `InformaTech.toml`.)*
 
-Journaux : `...\InformaTech\Logs\` (même racine que la config selon le contexte).
+Journaux : `...\InformaTech\log\<mode>\` (dossier `log` en minuscule, un
+sous-dossier par mode, ex. `log\get-id\`). Même racine que la config.
 
 ---
 
@@ -155,12 +157,13 @@ informatech-assistance-1.5.0-x86_64.exe --silent-install
 
 ---
 
-## 7. À finaliser
+## 7. Vérifications effectuées
 
-1. Déclencher le build en poussant le tag `v1.5.0-informatech.0` sur le fork
-   (`git push origin v1.5.0-informatech.0`).
-2. Après le build (~45–90 min) : relever les **SHA-256** depuis le résumé du job
-   et renseigner le § 1 ; confirmer que la release est téléchargeable.
-3. Vérifier sur le PC d'Adrien **sans installer en service** : lancer l'exe en
-   portable et exécuter `--get-id` (doit répondre un ID). Ne PAS lancer
-   `--silent-install` sur le PC d'Adrien.
+- ✅ Build `v1.5.0-informatech.0` réussi, release publiée (exe + msi).
+- ✅ SHA-256 de l'exe téléchargé = SHA-256 du build (asset intègre).
+- ✅ `--get-id` en portable répond un ID (`8235564` lors du test), crée bien la
+   config isolée sous `%APPDATA%\InformaTech\` (namespace séparé → coexiste sans
+   conflit avec un RustDesk officiel déjà installé, cas observé sur le PC de test).
+- Non testé (hors périmètre, demande `--silent-install` interdit sur le PC
+   d'Adrien) : installation réelle en service, masquage effectif tray/fenêtre en
+   conditions, titre de fenêtre côté viewer. À valider lors de l'intégration hub.
