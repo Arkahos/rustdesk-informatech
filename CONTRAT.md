@@ -4,11 +4,9 @@ Fiche d'intégration pour la session ArkaFactory (recette « prise-en-main » du
 kit, hub Tauri). Décrit le binaire produit par ce dépôt : comment le
 télécharger, l'installer en silencieux, le détecter et le piloter.
 
-> ⚠️ **État** : code, branding et workflow de release sont faits, committés et
-> poussés sur la branche `informatech`. Le build GitHub Actions se déclenche en
-> poussant le tag `v1.5.0-informatech.0`. Les champs **SHA-256** et la
-> confirmation « release téléchargeable / `--get-id` vérifié » sont à compléter
-> après le premier build. Tous les autres champs sont dérivés du code source.
+> ✅ **État** : build `v1.5.0-informatech.0` réussi, release publiée avec l'exe
+> et le .msi, SHA-256 renseignés ci-dessous. Reste la vérif `--get-id` en
+> portable sur le PC d'Adrien (§7).
 
 ---
 
@@ -33,13 +31,11 @@ télécharger, l'installer en silencieux, le détecter et le piloter.
 https://github.com/Arkahos/rustdesk-informatech/releases/download/v1.5.0-informatech.0/informatech-assistance-1.5.0-x86_64.exe
 ```
 
-### SHA-256
+### SHA-256 (build v1.5.0-informatech.0)
 
-> À compléter après le 1er build (figurent dans le résumé du job GitHub Actions
-> et peuvent être recalculés localement). Format attendu :
 ```
-<sha256>  informatech-assistance-1.5.0-x86_64.exe
-<sha256>  informatech-assistance-1.5.0-x86_64.msi
+8d465c5cc8e4e35f55dbf4f1d3c5f2e0426f109a7a0cfb7dc7cb2c0a69ad5bd8  informatech-assistance-1.5.0-x86_64.exe
+4594ea5adb6ba58605b5433d88c14061c73e7fb4e44b8771151ae8fdec8dee4c  informatech-assistance-1.5.0-x86_64.msi
 ```
 
 ---
