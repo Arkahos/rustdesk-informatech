@@ -2357,7 +2357,60 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
     ThrottledInterval::new(i)
 }
 
+// ===========================================================================
+// InformaTech — personnalisation du client (bloc UNIQUE à rejouer tel quel à
+// chaque nouvelle version de RustDesk ; tout tient ici, rien dans le
+// sous-module hbb_common). Objectif : sur le poste contrôlé, RustDesk
+// n'affiche ni icône de zone de notification, ni fenêtre de connexion. Le hub
+// InformaTech affiche à la place sa propre bannière « InformaTech est
+// connecté » avec un bouton Couper : le consentement reste visible, il est
+// seulement déplacé de l'UI native vers l'UI du hub.
+//
+// On reproduit ici, en dur dans le binaire, ce qu'un « custom client »
+// officiel recevrait via un custom.txt signé (clé de signature de RustDesk
+// que nous n'avons pas) :
+//
+//   - APP_NAME = "InformaTech"  -> rend is_custom_client() vrai
+//                        (get_app_name() != "RustDesk"), condition nécessaire
+//                        pour que hide-tray et hide_cm soient pris en compte.
+//                        DOIT rester [A-Za-z0-9-]+ sans espace : l'installeur
+//                        Windows le valide (validate_install_app_name) et
+//                        l'utilise pour le nom de service, le dossier
+//                        d'installation et le nom de l'exe (InformaTech.exe).
+//   - hide-tray = Y   -> masque l'icône de zone de notification.
+//                        Lu via get_builtin_option() => BUILTIN_SETTINGS.
+//   - allow-hide-cm = Y, approve-mode = password,
+//     verification-method = use-permanent-password
+//                     -> les trois conditions de password_security::hide_cm(),
+//                        qui masque la fenêtre de gestion des connexions (--cm).
+//                        Lus via Config::get_option() => DEFAULT_SETTINGS.
+//
+// Serveurs publics RustDesk inchangés : aucun rendezvous/relay/key injecté.
+// ===========================================================================
+fn apply_informatech_defaults() {
+    // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
+    // ce qui évite de modifier (et donc de forker) le sous-module hbb_common.
+    *config::APP_NAME.write().unwrap() = "InformaTech".to_owned();
+
+    config::BUILTIN_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_HIDE_TRAY.to_owned(), "Y".to_owned());
+    let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
+    defaults.insert(keys::OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
+    defaults.insert(
+        keys::OPTION_VERIFICATION_METHOD.to_owned(),
+        "use-permanent-password".to_owned(),
+    );
+    // "allow-hide-cm" n'a pas de constante dédiée dans base::config::keys ;
+    // password_security::hide_cm() le lit par ce littéral.
+    defaults.insert("allow-hide-cm".to_owned(), "Y".to_owned());
+}
+
 pub fn load_custom_client() {
+    // InformaTech : appliqué dans tous les processus (service, --cm, --tray,
+    // UI), car load_custom_client() est le point d'entrée commun de chacun.
+    apply_informatech_defaults();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
