@@ -1,6 +1,6 @@
 # CONTRAT — binaire InformaTech Assistance (fork RustDesk 1.5.0)
 
-Fiche d'intégration pour la session ArkaFactory (recette « prise-en-main » du
+Fiche d'intégration pour la session InformaTechHUB (recette « prise-en-main » du
 kit, hub Tauri). Décrit le binaire produit par ce dépôt : comment le
 télécharger, l'installer en silencieux, le détecter et le piloter.
 
