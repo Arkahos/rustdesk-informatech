@@ -149,9 +149,12 @@ informatech-assistance-1.5.0-x86_64.exe --silent-install
   de l'exe. Le poste contrôlé étant invisible, ce titre ne s'y voit jamais.
   → Si le titre long est souhaité côté viewer, c'est un ajout séparable
   (nom d'affichage distinct de `APP_NAME`), non fait ici.
-- **Icône** : monogramme InformaTech (identique au mark du hub). Une icône
-  dédiée « Assistance » pourrait être substituée plus tard (simple remplacement
-  de `res/icon.ico` + `flutter/windows/runner/resources/app_icon.ico`).
+- **Icône** : icône dédiée « InformaTech Assistance » de Jax (D-128, validée le
+  15/10 ; source dans ArkaClaudeBrandDesigner `informatech/brand/04-assets/assistance/`).
+  Remplacée dans `res/icon.ico`, `res/tray-icon.ico`,
+  `flutter/windows/runner/resources/app_icon.ico` (.ico 7 tailles), `res/icon.png`
+  (1024 px) et `flutter/assets/icon.svg`. **Effective à partir du build
+  `v1.5.0-informatech.1`** ; le build `.0` porte encore le monogramme.
 - **MSI conservé** (produit facilement par les étapes amont). Si inutile, il
   peut être retiré du workflow.
 
