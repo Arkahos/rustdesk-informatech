@@ -42,6 +42,25 @@ String? opmdIdSaisi(String texte) {
   return RegExp(r'^\d{6,12}$').hasMatch(d) ? d : null;
 }
 
+/// While the field holds only digits, shows them as « 203 133 650 » (groups of 3 from the left, as typed).
+class _GroupeurId extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final brut = newValue.text.replaceAll(' ', '');
+    if (brut.isEmpty || !RegExp(r'^\d+$').hasMatch(brut)) return newValue;
+    final b = StringBuffer();
+    for (var i = 0; i < brut.length; i++) {
+      if (i > 0 && i % 3 == 0) b.write(' ');
+      b.write(brut[i]);
+    }
+    final texte = b.toString();
+    final curseur = newValue.selection.end.clamp(0, newValue.text.length);
+    final avant = newValue.text.substring(0, curseur).replaceAll(' ', '').length;
+    final pos = avant == 0 ? 0 : avant + (avant - 1) ~/ 3;
+    return TextEditingValue(text: texte, selection: TextSelection.collapsed(offset: pos));
+  }
+}
+
 class OpmdHomePage extends StatefulWidget {
   const OpmdHomePage({Key? key}) : super(key: key);
 
@@ -105,6 +124,9 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
     final q = _champ.text.trim().toLowerCase();
     final peers = gFFI.recentPeersModel.peers;
     if (q.isEmpty || opmdIdSaisi(q) != null) return peers;
+    // The field groups digits by 3, the stored ID has no spaces.
+    final chiffres = q.replaceAll(' ', '');
+    if (RegExp(r'^\d+$').hasMatch(chiffres)) return peers.where((p) => p.id.contains(chiffres)).toList();
     return peers
         .where((p) => '${p.alias} ${p.hostname} ${p.id}'.toLowerCase().contains(q))
         .toList();
@@ -150,7 +172,21 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
+        // Poppins when installed (D-136); not bundled, so the system font otherwise.
+        const SizedBox(
+          height: 48,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Postes accessibles',
+              style: TextStyle(fontFamily: 'Poppins', color: Colors.white, fontSize: 19, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(width: 24),
+        const Spacer(),
+        SizedBox(
+          width: 380,
           child: Semantics(
             label: 'Chercher un client, un poste ou un identifiant',
             child: TextField(
@@ -158,8 +194,8 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
               focusNode: _focus,
               autofocus: true,
               onSubmitted: (_) => _valider(),
-              inputFormatters: [LengthLimitingTextInputFormatter(64)],
-              style: estId ? _mono.copyWith(color: Colors.white, fontSize: 15) : const TextStyle(color: Colors.white, fontSize: 15),
+              inputFormatters: [LengthLimitingTextInputFormatter(64), _GroupeurId()],
+              style: RegExp(r'^[\d ]+$').hasMatch(_champ.text) ? _mono.copyWith(color: Colors.white, fontSize: 15) : const TextStyle(color: Colors.white, fontSize: 15),
               cursorColor: _menthe,
               decoration: InputDecoration(
                 hintText: 'Client, poste ou identifiant',
