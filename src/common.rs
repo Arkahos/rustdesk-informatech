@@ -2418,6 +2418,18 @@ fn apply_informatech_defaults() {
     forces.insert("allow-hide-cm".to_owned(), "Y".to_owned());
 }
 
+/// InformaTech: `--close-connections`, used by the hub's « Terminer la session » on the client's PC. Killing the
+/// --cm window is not enough (the OPMD trial of 16/10 showed --server respawning it while the connection lived on).
+/// Asks the --server process over the main IPC to close: it ends every incoming connection and exits, and the
+/// service starts a fresh --server a moment later, so the technician can reconnect while access stays open.
+/// The main IPC only accepts peers running this same executable.
+#[tokio::main(flavor = "current_thread")]
+pub async fn informatech_close_connections() -> ResultType<()> {
+    let mut c = crate::ipc::connect(1000, "").await?;
+    c.send(&crate::ipc::Data::Close).await?;
+    Ok(())
+}
+
 pub fn load_custom_client() {
     // InformaTech : appliqué dans tous les processus (service, --cm, --tray,
     // UI), car load_custom_client() est le point d'entrée commun de chacun.
