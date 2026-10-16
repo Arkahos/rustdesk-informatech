@@ -148,42 +148,52 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
   Widget _entete() {
     final estId = opmdIdSaisi(_champ.text) != null;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: TextField(
-            controller: _champ,
-            focusNode: _focus,
-            autofocus: true,
-            onSubmitted: (_) => _valider(),
-            inputFormatters: [LengthLimitingTextInputFormatter(64)],
-            style: estId ? _mono.copyWith(color: Colors.white, fontSize: 15) : const TextStyle(color: Colors.white, fontSize: 15),
-            cursorColor: _menthe,
-            decoration: InputDecoration(
-              hintText: 'Client, poste ou identifiant',
-              hintStyle: const TextStyle(color: _texte3),
-              prefixIcon: const Icon(Icons.search, color: _texte3, size: 20),
-              filled: true,
-              fillColor: _surface,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _trait)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _trait)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _menthe)),
+          child: Semantics(
+            label: 'Chercher un client, un poste ou un identifiant',
+            child: TextField(
+              controller: _champ,
+              focusNode: _focus,
+              autofocus: true,
+              onSubmitted: (_) => _valider(),
+              inputFormatters: [LengthLimitingTextInputFormatter(64)],
+              style: estId ? _mono.copyWith(color: Colors.white, fontSize: 15) : const TextStyle(color: Colors.white, fontSize: 15),
+              cursorColor: _menthe,
+              decoration: InputDecoration(
+                hintText: 'Client, poste ou identifiant',
+                hintStyle: const TextStyle(color: _texte3),
+                // A blank helper keeps the row height steady while the hint comes and goes.
+                helperText: estId ? 'Entrée pour se connecter' : ' ',
+                helperStyle: const TextStyle(color: _menthe, fontSize: 13),
+                prefixIcon: const Icon(Icons.search, color: _texte3, size: 20),
+                filled: true,
+                fillColor: _surface,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _trait)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _trait)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _menthe, width: 2)),
+              ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        SizedBox(
-          height: 48,
-          child: FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: _menthe,
-              foregroundColor: _nuit,
-              disabledBackgroundColor: _menthe.withOpacity(0.35),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        _Anneau(
+          rayon: 10,
+          child: SizedBox(
+            height: 48,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _menthe,
+                foregroundColor: _nuit,
+                disabledBackgroundColor: _menthe.withOpacity(0.35),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+              onPressed: estId ? _valider : null,
+              child: const Text('Se connecter'),
             ),
-            onPressed: estId ? _valider : null,
-            child: const Text('Se connecter'),
           ),
         ),
       ],
@@ -237,10 +247,10 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
           const SizedBox(width: 8),
           Text(
             ok == null ? 'Connexion au serveur InformaTech…' : (ok ? 'Serveur InformaTech joignable' : 'Serveur injoignable'),
-            style: const TextStyle(color: _texte2, fontSize: 12),
+            style: const TextStyle(color: _texte2, fontSize: 13),
           ),
           const Spacer(),
-          const Text('Moteur OPMD $kOpmdVersion', style: TextStyle(color: _texte3, fontSize: 12)),
+          const Text('Moteur OPMD $kOpmdVersion', style: TextStyle(color: _texte3, fontSize: 13)),
         ],
       ),
     );
@@ -273,12 +283,13 @@ class _BarreTitre extends StatelessWidget {
               ),
             ),
           ),
-          _BoutonFenetre(icone: Icons.remove, onTap: () => windowManager.minimize()),
+          _BoutonFenetre(icone: Icons.remove, libelle: 'Réduire', onTap: () => windowManager.minimize()),
           _BoutonFenetre(
             icone: Icons.crop_square,
+            libelle: 'Agrandir',
             onTap: () async => await windowManager.isMaximized() ? windowManager.unmaximize() : windowManager.maximize(),
           ),
-          _BoutonFenetre(icone: Icons.close, danger: true, onTap: () => windowManager.close()),
+          _BoutonFenetre(icone: Icons.close, libelle: 'Fermer', danger: true, onTap: () => windowManager.close()),
         ],
       ),
     );
@@ -287,9 +298,10 @@ class _BarreTitre extends StatelessWidget {
 
 class _BoutonFenetre extends StatefulWidget {
   final IconData icone;
+  final String libelle;
   final VoidCallback onTap;
   final bool danger;
-  const _BoutonFenetre({required this.icone, required this.onTap, this.danger = false});
+  const _BoutonFenetre({required this.icone, required this.libelle, required this.onTap, this.danger = false});
 
   @override
   State<_BoutonFenetre> createState() => _BoutonFenetreState();
@@ -297,20 +309,97 @@ class _BoutonFenetre extends StatefulWidget {
 
 class _BoutonFenetreState extends State<_BoutonFenetre> {
   bool _survol = false;
+  bool _focus = false;
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _survol = true),
-      onExit: (_) => setState(() => _survol = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          width: 46,
-          height: 40,
-          color: _survol ? (widget.danger ? const Color(0xFFC62F3B) : _trait) : Colors.transparent,
-          child: Icon(widget.icone, size: 16, color: _survol ? Colors.white : _texte2),
+    return Semantics(
+      button: true,
+      label: widget.libelle,
+      child: Tooltip(
+        message: widget.libelle,
+        waitDuration: const Duration(milliseconds: 600),
+        excludeFromSemantics: true,
+        child: FocusableActionDetector(
+          mouseCursor: SystemMouseCursors.click,
+          onShowHoverHighlight: (v) => setState(() => _survol = v),
+          onShowFocusHighlight: (v) => setState(() => _focus = v),
+          actions: {ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) => widget.onTap())},
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: Container(
+              width: 46,
+              height: 40,
+              decoration: BoxDecoration(
+                color: _survol ? (widget.danger ? const Color(0xFFC62F3B) : _trait) : Colors.transparent,
+                // Inset ring: the 40 px bar has no room for a 2 px offset outside the button.
+                border: _focus ? Border.all(color: _menthe, width: 2) : null,
+              ),
+              child: Icon(widget.icone, size: 16, color: _survol || _focus ? Colors.white : _texte2),
+            ),
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// 2 px mint ring, 2 px outside [child], while keyboard focus is inside it (D-136 review). Takes no layout space.
+class _Anneau extends StatefulWidget {
+  final Widget child;
+  final double rayon;
+  const _Anneau({required this.child, required this.rayon});
+
+  @override
+  State<_Anneau> createState() => _AnneauState();
+}
+
+class _AnneauState extends State<_Anneau> {
+  bool _focus = false;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_mode);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_mode);
+    super.dispose();
+  }
+
+  void _mode(FocusHighlightMode _) {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _focus && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (v) => setState(() => _focus = v),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          widget.child,
+          if (visible)
+            Positioned(
+              left: -4,
+              top: -4,
+              right: -4,
+              bottom: -4,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _menthe, width: 2),
+                    borderRadius: BorderRadius.circular(widget.rayon + 4),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -321,7 +410,7 @@ class _LigneEntete extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const s = TextStyle(color: _texte3, fontSize: 12, fontWeight: FontWeight.w600);
+    const s = TextStyle(color: _texte3, fontSize: 13, fontWeight: FontWeight.w600);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
       decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _trait))),
@@ -347,6 +436,7 @@ class _LignePoste extends StatelessWidget {
   Widget build(BuildContext context) {
     final client = peer.alias.trim();
     return InkWell(
+      canRequestFocus: false,
       onDoubleTap: onConnecter,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
@@ -365,7 +455,7 @@ class _LignePoste extends StatelessWidget {
                         : const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                   const SizedBox(height: 3),
-                  Text(peer.hostname.isEmpty ? 'Poste sans nom' : peer.hostname, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _texte2, fontSize: 12.5)),
+                  Text(peer.hostname.isEmpty ? 'Poste sans nom' : peer.hostname, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _texte2, fontSize: 13)),
                 ],
               ),
             ),
@@ -374,14 +464,17 @@ class _LignePoste extends StatelessWidget {
               width: 150,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _menthe,
-                    side: const BorderSide(color: _menthe),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: _Anneau(
+                  rayon: 8,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _menthe,
+                      side: const BorderSide(color: _menthe),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: onConnecter,
+                    child: const Text('Se connecter'),
                   ),
-                  onPressed: onConnecter,
-                  child: const Text('Se connecter'),
                 ),
               ),
             ),
