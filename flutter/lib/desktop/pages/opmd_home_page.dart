@@ -23,7 +23,7 @@ const _police = 'Poppins';
 const _mono = TextStyle(fontFamily: 'Cascadia Mono', fontFamilyFallback: ['Consolas', 'monospace']);
 
 /// Engine version shown in the footer (0.x only, team rule).
-const kOpmdVersion = '0.1.0';
+const kOpmdVersion = '0.1.1';
 
 /// « 203 133 650 »: digits grouped by 3.
 String opmdIdGroupe(String id) {
