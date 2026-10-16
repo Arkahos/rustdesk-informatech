@@ -144,7 +144,7 @@ OPMD-0.1.0-x86_64.exe --silent-install
 - **Métadonnées de l'exe** (Propriétés → Détails) : ProductName
   « InformaTech Assistance », FileDescription « InformaTech Assistance »,
   CompanyName « InformaTech ».
-- **Serveurs** : rendezvous/relay publics RustDesk **inchangés**.
+- **Serveurs** (from OPMD 0.1.0): InformaTech's own ID/relay server `opmd.informatech-paca.fr` (21116/21117) and its public key, locked in the engine; no fallback to the public RustDesk servers (`v1.5.0-informatech.0` still used them).
 
 ### Décisions structurantes (choix du plus simple, cf. CLAUDE.md)
 
