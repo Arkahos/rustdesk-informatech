@@ -77,6 +77,16 @@ jobs:
         with:
           submodules: recursive
 
+      # OPMD talks only to InformaTech's own server, which accepts encrypted connections only: never build an
+      # engine without its public key.
+      - name: OPMD server key present
+        shell: bash
+        run: |
+          if grep -q 'pub const OPMD_SERVER_KEY: &str = "";' src/common.rs; then
+            echo "::error::OPMD_SERVER_KEY is empty in src/common.rs: set the server's public key before tagging."
+            exit 1
+          fi
+
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

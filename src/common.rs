@@ -2385,8 +2385,14 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 //                        qui masque la fenêtre de gestion des connexions (--cm).
 //                        Lus via Config::get_option() => OVERWRITE_SETTINGS (verrouillés).
 //
-// Serveurs publics RustDesk inchangés : aucun rendezvous/relay/key injecté.
+// OPMD 0.1.0: our own ID/relay server (OPMD_SERVER, OPMD_SERVER_KEY below), locked too. No fallback to the
+// public RustDesk servers: if ours is unreachable, connections fail.
 // ===========================================================================
+/// InformaTech: ID (rendezvous, 21116) and relay (21117) server of OPMD, run by InformaTech.
+pub const OPMD_SERVER: &str = "opmd.informatech-paca.fr";
+/// InformaTech: the server's public key (Ed25519, base64). The server only accepts encrypted connections, so it is
+/// mandatory; the release workflow refuses to build while it is empty.
+pub const OPMD_SERVER_KEY: &str = "";
 // InformaTech: Windows-facing labels (Jax's OPMD design, D-135). APP_NAME stays the technical name
 // (service, folder, exe); these are only shown in services.msc and the apps list.
 pub const INFORMATECH_DISPLAY_NAME: &str = "InformaTech Assistance";
@@ -2416,6 +2422,10 @@ fn apply_informatech_defaults() {
     // "allow-hide-cm" n'a pas de constante dédiée dans base::config::keys ;
     // password_security::hide_cm() le lit par ce littéral.
     forces.insert("allow-hide-cm".to_owned(), "Y".to_owned());
+    // OPMD's own server, locked: no stored config or option can point the engine elsewhere.
+    forces.insert("custom-rendezvous-server".to_owned(), OPMD_SERVER.to_owned());
+    forces.insert(keys::OPTION_RELAY_SERVER.to_owned(), OPMD_SERVER.to_owned());
+    forces.insert("key".to_owned(), OPMD_SERVER_KEY.to_owned());
 }
 
 /// InformaTech: `--close-connections`, used by the hub's « Terminer la session » on the client's PC. Killing the
