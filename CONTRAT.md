@@ -1,12 +1,13 @@
-# CONTRAT — binaire InformaTech Assistance (fork RustDesk 1.5.0)
+# CONTRAT — OPMD, binaire InformaTech Assistance (fork de RustDesk 1.5.0, AGPL-3.0)
 
 Fiche d'intégration pour la session InformaTechHUB (recette « prise-en-main » du
 kit, hub Tauri). Décrit le binaire produit par ce dépôt : comment le
 télécharger, l'installer en silencieux, le détecter et le piloter.
 
-> ✅ **État** : build `v1.5.0-informatech.0` réussi, release publiée avec l'exe
-> et le .msi, SHA-256 renseignés ci-dessous. Reste la vérif `--get-id` en
-> portable sur le PC d'Adrien (§7).
+> **Naming (16/10/2026)**: the engine is called **OPMD** and is versioned 0.x like
+> every InformaTech project. Next release: **OPMD 0.1.0**, tag `opmd-v0.1.0`
+> (then 0.1.1, …). The earlier pre-release `v1.5.0-informatech.0` stays below as
+> history.
 
 ---
 
@@ -16,22 +17,24 @@ télécharger, l'installer en silencieux, le détecter et le piloter.
 |---|---|
 | Dépôt (public, AGPL-3.0) | https://github.com/Arkahos/rustdesk-informatech |
 | Branche de travail | `informatech` (depuis le tag amont `1.5.0`) |
-| Tag de release | `v1.5.0-informatech.0` (incrémenter `.N` pour republier) |
-| Page de release (prévue) | https://github.com/Arkahos/rustdesk-informatech/releases/tag/v1.5.0-informatech.0 |
+| Tag de release | `opmd-vX.Y.Z` (workflow `informatech-release.yml`) ; prochain : `opmd-v0.1.0` |
+| Page de release | https://github.com/Arkahos/rustdesk-informatech/releases/tag/opmd-v0.1.0 |
 
 ### Fichiers de la release (nommage figé dans le workflow)
 
 | Fichier | Rôle |
 |---|---|
-| `informatech-assistance-1.5.0-x86_64.exe` | **Exe à déployer** : installeur portable auto-extractible (RustDesk « portable packer »). C'est ce fichier que le hub télécharge et lance avec `--silent-install`. |
-| `informatech-assistance-1.5.0-x86_64.msi` | Variante MSI (même contenu), fournie si besoin d'un déploiement MSI. |
+| `OPMD-0.1.0-x86_64.exe` | **Exe à déployer** : installeur portable auto-extractible (« portable packer » amont). C'est ce fichier que le hub télécharge et lance avec `--silent-install`. |
+| `OPMD-0.1.0-x86_64.msi` | Variante MSI (même contenu), fournie si besoin d'un déploiement MSI. |
 
-**URL de téléchargement directe de l'exe** (prévue) :
+**URL de téléchargement directe de l'exe** :
 ```
-https://github.com/Arkahos/rustdesk-informatech/releases/download/v1.5.0-informatech.0/informatech-assistance-1.5.0-x86_64.exe
+https://github.com/Arkahos/rustdesk-informatech/releases/download/opmd-v0.1.0/OPMD-0.1.0-x86_64.exe
 ```
 
-### SHA-256 (build v1.5.0-informatech.0)
+SHA-256 of OPMD 0.1.0: in the build job summary once built (to pin in the hub recipe).
+
+### SHA-256 (historique : pré-release v1.5.0-informatech.0)
 
 ```
 8d465c5cc8e4e35f55dbf4f1d3c5f2e0426f109a7a0cfb7dc7cb2c0a69ad5bd8  informatech-assistance-1.5.0-x86_64.exe
@@ -44,7 +47,7 @@ https://github.com/Arkahos/rustdesk-informatech/releases/download/v1.5.0-informa
 
 Commande (élévation requise, lancée par le hub) :
 ```
-informatech-assistance-1.5.0-x86_64.exe --silent-install
+OPMD-0.1.0-x86_64.exe --silent-install
 ```
 
 Résultat après installation :
@@ -53,14 +56,14 @@ Résultat après installation :
 |---|---|
 | Dossier d'installation | `C:\Program Files\InformaTech\` |
 | Exécutable installé | `C:\Program Files\InformaTech\InformaTech.exe` |
-| Nom du service Windows | **`InformaTech`** ; display name « InformaTech Assistance » + description (from `-informatech.1`) |
-| Apps list | « InformaTech Assistance », publisher « InformaTech » (from `-informatech.1`) |
+| Nom du service Windows | **`InformaTech`** ; display name « InformaTech Assistance » + description (from OPMD 0.1.0) |
+| Apps list | « InformaTech Assistance », publisher « InformaTech » (from OPMD 0.1.0) |
 
 > L'exe interne du build s'appelle `rustdesk.exe` ; `--silent-install` le copie
 > dans `C:\Program Files\InformaTech\` **en le renommant `InformaTech.exe`**.
 > Tous les processus runtime portent donc le nom `InformaTech.exe`.
 >
-> **Fixed in `-informatech.1`**: in `-informatech.0` the install kept the name
+> **Fixed in OPMD 0.1.0**: in `v1.5.0-informatech.0` the install kept the name
 > `rustdesk.exe` while the service points to `InformaTech.exe`, so the service
 > could not start after a fresh install. The install now renames the exe, as the
 > update path already did.
@@ -120,7 +123,7 @@ Toutes conservées à l'identique :
 
 Séquence type côté hub (poste client) :
 ```
-informatech-assistance-1.5.0-x86_64.exe --silent-install
+OPMD-0.1.0-x86_64.exe --silent-install
 "C:\Program Files\InformaTech\InformaTech.exe" --password <mdp-genere>
 "C:\Program Files\InformaTech\InformaTech.exe" --get-id      # -> ID a enregistrer
 ```
@@ -156,11 +159,11 @@ informatech-assistance-1.5.0-x86_64.exe --silent-install
   → Si le titre long est souhaité côté viewer, c'est un ajout séparable
   (nom d'affichage distinct de `APP_NAME`), non fait ici.
 - **Icône** : icône dédiée « InformaTech Assistance » de Jax (D-128, validée le
-  15/10 ; source dans ArkaClaudeBrandDesigner `informatech/brand/04-assets/assistance/`).
+  15/10).
   Remplacée dans `res/icon.ico`, `res/tray-icon.ico`,
   `flutter/windows/runner/resources/app_icon.ico` (.ico 7 tailles), `res/icon.png`
-  (1024 px) et `flutter/assets/icon.svg`. **Effective à partir du build
-  `v1.5.0-informatech.1`** ; le build `.0` porte encore le monogramme.
+  (1024 px) et `flutter/assets/icon.svg`. **Effective à partir d'OPMD
+  0.1.0** ; la pré-release `v1.5.0-informatech.0` porte encore le monogramme.
 - **MSI conservé** (produit facilement par les étapes amont). Si inutile, il
   peut être retiré du workflow.
 

@@ -1,21 +1,22 @@
 # ============================================================================
-# InformaTech — build et release Windows x64 uniquement.
+# OPMD (InformaTech remote-control engine) — Windows x64 build and release only.
+# OPMD is a fork of RustDesk (AGPL-3.0); upstream credits and licence are kept.
 #
-# Déclenché par un tag v1.5.0-informatech.N (ou manuellement). Réutilise tels
+# Triggered by a tag opmd-vX.Y.Z (versions stay 0.x), or manually. Réutilise tels
 # quels les workflows amont bridge.yml et third-party-RustDeskTempTopMostWindow
 # (donc faciles à conserver d'une version de RustDesk à l'autre), puis copie les
 # étapes Windows x64 (flutter) de flutter-build.yml, SANS arm64 ni signature de
 # code. Produit une pré-release sur ce dépôt avec l'exe portable auto-extractible
 # et le .msi.
 #
-# Pour republier : créer un nouveau tag v1.5.0-informatech.N (N incrémenté).
+# To publish again: create a new tag opmd-v0.1.N (N incremented).
 # ============================================================================
-name: InformaTech Release
+name: OPMD Release
 
 on:
   push:
     tags:
-      - "v1.5.0-informatech.*"
+      - "opmd-v*"
   workflow_dispatch:
 
 env:
@@ -28,6 +29,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VCPKG_CMAKE_VERSION: "4.3.0"
+  # Upstream RustDesk version this build is based on (not the OPMD version).
   VERSION: "1.5.0"
   TAG_NAME: "${{ github.ref_name }}"
   UPLOAD_ARTIFACT: "true"
@@ -50,7 +52,7 @@ jobs:
       target_version: Windows10
 
   build-windows-x64:
-    name: x86_64-pc-windows-msvc (InformaTech)
+    name: x86_64-pc-windows-msvc (OPMD)
     needs: [generate-bridge, topmost]
     runs-on: windows-2022
     permissions:
@@ -62,6 +64,13 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: OPMD version from the tag
+        shell: bash
+        run: |
+          ref="${{ github.ref_name }}"
+          if [[ "$ref" == opmd-v* ]]; then v="${ref#opmd-v}"; else v="0.0.0-dev"; fi
+          echo "OPMD_VERSION=$v" >> "$GITHUB_ENV"
 
       - name: Checkout source code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -202,7 +211,7 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/informatech-assistance-${{ env.VERSION }}-x86_64.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/OPMD-${{ env.OPMD_VERSION }}-x86_64.exe
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -216,8 +225,8 @@ jobs:
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          mv $msi.FullName ../../SignOutput/informatech-assistance-${{ env.VERSION }}-x86_64.msi
-          sha256sum ../../SignOutput/informatech-assistance-*.msi
+          mv $msi.FullName ../../SignOutput/OPMD-${{ env.OPMD_VERSION }}-x86_64.msi
+          sha256sum ../../SignOutput/OPMD-*.msi
 
       - name: SHA-256
         shell: bash
@@ -232,11 +241,12 @@ jobs:
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
-          name: InformaTech Assistance ${{ env.TAG_NAME }}
+          name: OPMD ${{ env.OPMD_VERSION }}
           body: |
-            Build InformaTech (fork de RustDesk ${{ env.VERSION }}, AGPL-3.0), Windows x64.
-            Masque l'icône de zone de notification et la fenêtre de connexion sur le poste contrôlé.
-            Les empreintes SHA-256 figurent dans le résumé du job de build.
+            OPMD ${{ env.OPMD_VERSION }} (InformaTech Assistance), Windows x64.
+            Based on RustDesk ${{ env.VERSION }} (https://github.com/rustdesk/rustdesk), AGPL-3.0; full source in this repository.
+            Hides the tray icon and the connection window on the controlled computer.
+            SHA-256 checksums are in the build job summary.
           files: |
-            ./SignOutput/informatech-assistance-*.exe
-            ./SignOutput/informatech-assistance-*.msi
+            ./SignOutput/OPMD-*.exe
+            ./SignOutput/OPMD-*.msi
