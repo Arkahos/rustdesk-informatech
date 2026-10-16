@@ -2426,6 +2426,8 @@ fn apply_informatech_defaults() {
     forces.insert("custom-rendezvous-server".to_owned(), OPMD_SERVER.to_owned());
     forces.insert(keys::OPTION_RELAY_SERVER.to_owned(), OPMD_SERVER.to_owned());
     forces.insert("key".to_owned(), OPMD_SERVER_KEY.to_owned());
+    // OPMD 0.1.1: no remote audio. The live trial with a client on a Discord call gave an echo.
+    forces.insert(keys::OPTION_ENABLE_AUDIO.to_owned(), "N".to_owned());
 }
 
 /// InformaTech: `--close-connections`, used by the hub's « Terminer la session » on the client's PC. Killing the
