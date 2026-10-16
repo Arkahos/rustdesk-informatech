@@ -2391,8 +2391,8 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 /// InformaTech: ID (rendezvous, 21116) and relay (21117) server of OPMD, run by InformaTech.
 pub const OPMD_SERVER: &str = "opmd.informatech-paca.fr";
 /// InformaTech: the server's public key (Ed25519, base64). The server only accepts encrypted connections, so it is
-/// mandatory; the release workflow refuses to build while it is empty.
-pub const OPMD_SERVER_KEY: &str = "";
+/// mandatory (from R2, rustdesk-server 1.1.16, 16/10). The release workflow refuses to build if it is empty.
+pub const OPMD_SERVER_KEY: &str = "ZNctqUAShcuH6NEbXEYRwEJdV67IsB21EylHj6AFrqw=";
 // InformaTech: Windows-facing labels (Jax's OPMD design, D-135). APP_NAME stays the technical name
 // (service, folder, exe); these are only shown in services.msc and the apps list.
 pub const INFORMATECH_DISPLAY_NAME: &str = "InformaTech Assistance";
