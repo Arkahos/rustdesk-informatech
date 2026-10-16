@@ -32,7 +32,11 @@ télécharger, l'installer en silencieux, le détecter et le piloter.
 https://github.com/Arkahos/rustdesk-informatech/releases/download/opmd-v0.1.0/OPMD-0.1.0-x86_64.exe
 ```
 
-SHA-256 of OPMD 0.1.0: in the build job summary once built (to pin in the hub recipe).
+SHA-256 of OPMD 0.1.0:
+
+```
+fadf4487c64d590d85c2418e60d506b8e208c217733cd3e5c20b8c5764ec92b4  OPMD-0.1.0-x86_64.exe
+```
 
 ### SHA-256 (historique : pré-release v1.5.0-informatech.0)
 
