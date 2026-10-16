@@ -19,6 +19,7 @@ const _texte2 = Color(0xFFB9C3E6);
 const _texte3 = Color(0xFF8C98C2);
 const _ambre = Color(0xFFF2B84B);
 const _trait = Color(0x1FFFFFFF);
+const _police = 'Poppins';
 const _mono = TextStyle(fontFamily: 'Cascadia Mono', fontFamilyFallback: ['Consolas', 'monospace']);
 
 /// Engine version shown in the footer (0.x only, team rule).
@@ -134,7 +135,7 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final page = Scaffold(
       backgroundColor: _nuit,
       body: Container(
         decoration: const BoxDecoration(
@@ -165,6 +166,15 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
         ),
       ),
     );
+    // Charter font (D-20) for this screen only; IDs keep their monospace style.
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(
+        textTheme: theme.textTheme.apply(fontFamily: _police),
+        primaryTextTheme: theme.primaryTextTheme.apply(fontFamily: _police),
+      ),
+      child: page,
+    );
   }
 
   Widget _entete() {
@@ -172,14 +182,13 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Poppins when installed (D-136); not bundled, so the system font otherwise.
         const SizedBox(
           height: 48,
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
               'Postes accessibles',
-              style: TextStyle(fontFamily: 'Poppins', color: Colors.white, fontSize: 19, fontWeight: FontWeight.w600),
+              style: TextStyle(fontFamily: _police, color: Colors.white, fontSize: 19, fontWeight: FontWeight.w600),
             ),
           ),
         ),
@@ -225,7 +234,7 @@ class _OpmdHomePageState extends State<OpmdHomePage> {
                 foregroundColor: _nuit,
                 disabledBackgroundColor: _menthe.withOpacity(0.35),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                textStyle: const TextStyle(fontFamily: _police, fontWeight: FontWeight.w600, fontSize: 14),
               ),
               onPressed: estId ? _valider : null,
               child: const Text('Se connecter'),
