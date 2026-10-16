@@ -2383,7 +2383,7 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 //     verification-method = use-permanent-password
 //                     -> les trois conditions de password_security::hide_cm(),
 //                        qui masque la fenêtre de gestion des connexions (--cm).
-//                        Lus via Config::get_option() => DEFAULT_SETTINGS.
+//                        Lus via Config::get_option() => OVERWRITE_SETTINGS (verrouillés).
 //
 // Serveurs publics RustDesk inchangés : aucun rendezvous/relay/key injecté.
 // ===========================================================================
@@ -2403,15 +2403,19 @@ fn apply_informatech_defaults() {
         .write()
         .unwrap()
         .insert(keys::OPTION_HIDE_TRAY.to_owned(), "Y".to_owned());
-    let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
-    defaults.insert(keys::OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
-    defaults.insert(
+    // InformaTech: OVERWRITE, not DEFAULT. A default loses to any value stored in the service's config file, and
+    // the OPMD trial of 16/10 showed the --cm window on the client. Overwritten options always win in every
+    // process and cannot be changed by --option or the settings UI, so hide_cm() is always true. Our product
+    // only uses the permanent password set by the hub, so locking these three is the intended behaviour.
+    let mut forces = config::OVERWRITE_SETTINGS.write().unwrap();
+    forces.insert(keys::OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
+    forces.insert(
         keys::OPTION_VERIFICATION_METHOD.to_owned(),
         "use-permanent-password".to_owned(),
     );
     // "allow-hide-cm" n'a pas de constante dédiée dans base::config::keys ;
     // password_security::hide_cm() le lit par ce littéral.
-    defaults.insert("allow-hide-cm".to_owned(), "Y".to_owned());
+    forces.insert("allow-hide-cm".to_owned(), "Y".to_owned());
 }
 
 pub fn load_custom_client() {

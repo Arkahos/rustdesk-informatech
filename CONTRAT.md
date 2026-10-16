@@ -135,7 +135,7 @@ OPMD-0.1.0-x86_64.exe --silent-install
 - **Tray masquée** : `hide-tray=Y` → pas d'icône de zone de notification.
 - **Fenêtre de connexion masquée** : `allow-hide-cm=Y` + `approve-mode=password`
   + `verification-method=use-permanent-password` → `password_security::hide_cm()`
-  vrai → la fenêtre `--cm` démarre masquée. Le poste contrôlé n'affiche donc
+  vrai → la fenêtre `--cm` démarre masquée. From OPMD 0.1.0 these three are **locked** (OVERWRITE_SETTINGS): no stored config, `--option` or settings UI can change them, so the window stays hidden (OPMD trial of 16/10). Le poste contrôlé n'affiche donc
   **rien** nativement ; le hub InformaTech porte la bannière « connecté » + Couper.
 - **Mode d'approbation = mot de passe permanent uniquement** (conséquence des
   réglages ci-dessus) : une connexion entrante est acceptée automatiquement si
