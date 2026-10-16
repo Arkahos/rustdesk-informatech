@@ -1727,14 +1727,15 @@ copy /Y \"{tmp_path}\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsoft\\Windows\
 chcp 65001
 md \"{path}\"
 {copy_exe}
+{rename_exe}
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
-reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{display_name}\"
 reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v InstallLocation /t REG_SZ /d \"{path}\"
-reg add {subkey} /f /v Publisher /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v Publisher /t REG_SZ /d \"{publisher}\"
 reg add {subkey} /f /v VersionMajor /t REG_DWORD /d {version_major}
 reg add {subkey} /f /v VersionMinor /t REG_DWORD /d {version_minor}
 reg add {subkey} /f /v VersionBuild /t REG_DWORD /d {version_build}
@@ -1765,6 +1766,11 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         sleep = if debug { "timeout 300" } else { "" },
         dels = if debug { "" } else { &dels },
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
+        // InformaTech: the portable packer extracts rustdesk.exe, but the service and every path use
+        // {app_name}.exe; rename on install as update_me already does (OPMD trial of 16/10).
+        rename_exe = rename_exe_cmd(&src_exe, &path)?,
+        display_name = crate::common::INFORMATECH_DISPLAY_NAME,
+        publisher = crate::common::INFORMATECH_PUBLISHER,
         import_config = get_import_config(&exe),
     );
     run_cmds(cmds, debug, "install")?;
@@ -3948,10 +3954,14 @@ if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{ap
     } else {
         let exe = escape_nested_cmd_ampersands(exe);
         format!("
-sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{app_name} Service\"
+sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{display_name}\"
+sc description {app_name} \"{description}\"
 sc start {app_name}
 ",
-    app_name = crate::get_app_name())
+    app_name = crate::get_app_name(),
+    // InformaTech: readable name and description in services.msc (OPMD design, D-135).
+    display_name = crate::common::INFORMATECH_DISPLAY_NAME,
+    description = crate::common::INFORMATECH_SERVICE_DESCRIPTION)
     }
 }
 

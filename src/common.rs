@@ -2387,6 +2387,13 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 //
 // Serveurs publics RustDesk inchangés : aucun rendezvous/relay/key injecté.
 // ===========================================================================
+// InformaTech: Windows-facing labels (Jax's OPMD design, D-135). APP_NAME stays the technical name
+// (service, folder, exe); these are only shown in services.msc and the apps list.
+pub const INFORMATECH_DISPLAY_NAME: &str = "InformaTech Assistance";
+pub const INFORMATECH_PUBLISHER: &str = "InformaTech";
+pub const INFORMATECH_SERVICE_DESCRIPTION: &str =
+    "Permet à InformaTech de vous aider à distance, avec votre accord. Retirez l'accès depuis InformaTech Hub › Assistance.";
+
 fn apply_informatech_defaults() {
     // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
     // ce qui évite de modifier (et donc de forker) le sous-module hbb_common.

@@ -53,11 +53,17 @@ Résultat après installation :
 |---|---|
 | Dossier d'installation | `C:\Program Files\InformaTech\` |
 | Exécutable installé | `C:\Program Files\InformaTech\InformaTech.exe` |
-| Nom du service Windows | **`InformaTech`** (nom = nom d'affichage) |
+| Nom du service Windows | **`InformaTech`** ; display name « InformaTech Assistance » + description (from `-informatech.1`) |
+| Apps list | « InformaTech Assistance », publisher « InformaTech » (from `-informatech.1`) |
 
 > L'exe interne du build s'appelle `rustdesk.exe` ; `--silent-install` le copie
 > dans `C:\Program Files\InformaTech\` **en le renommant `InformaTech.exe`**.
 > Tous les processus runtime portent donc le nom `InformaTech.exe`.
+>
+> **Fixed in `-informatech.1`**: in `-informatech.0` the install kept the name
+> `rustdesk.exe` while the service points to `InformaTech.exe`, so the service
+> could not start after a fresh install. The install now renames the exe, as the
+> update path already did.
 
 ---
 
