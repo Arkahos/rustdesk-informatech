@@ -3,6 +3,7 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/pages/opmd_home_page.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -91,6 +92,22 @@ class _DesktopTabPageState extends State<DesktopTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    // InformaTech: the main window is the OPMD home screen (D-136), not the stock home with its tab bar.
+    // The tab controller above stays registered: other code looks it up.
+    const opmd = OpmdHomePage(key: ValueKey(kTabLabelHomePage));
+    if (isMacOS || kUseCompatibleUiMode) return opmd;
+    return Obx(
+      () => DragToResizeArea(
+        resizeEdgeSize: stateGlobal.resizeEdgeSize.value,
+        enableResizeEdges: windowManagerEnableResizeEdges,
+        child: opmd,
+      ),
+    );
+  }
+
+  // Stock tabbed home, kept unused so upstream merges stay simple.
+  // ignore: unused_element
+  Widget _buildStock(BuildContext context) {
     final tabWidget = Container(
         child: Scaffold(
             backgroundColor: Theme.of(context).colorScheme.background,
