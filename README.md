@@ -1,29 +1,25 @@
 <!-- ============================================================= -->
-<!-- InformaTech — fork de RustDesk pour la télémaintenance       -->
+<!-- OPMD (InformaTech Assistance), fork of RustDesk                -->
 <!-- ============================================================= -->
 
-> # InformaTech Assistance — fork de RustDesk
+> # OPMD (InformaTech Assistance), a fork of RustDesk
 >
-> Ce dépôt est un **fork de [RustDesk](https://github.com/rustdesk/rustdesk)** (tag `1.5.0`),
-> maintenu par **InformaTech** (dépannage informatique) pour l'outil de
-> télémaintenance intégré à son hub. RustDesk et ce fork sont sous licence
-> **AGPL-3.0** : le code source complet de ce qui est distribué (y compris nos
-> modifications) est public dans ce dépôt, conformément à la licence.
+> This repository is a **fork of [RustDesk](https://github.com/rustdesk/rustdesk)** (base tag `1.5.0`), maintained by
+> **InformaTech** (computer repair, Gap, France) for the remote-support tool built into its hub. RustDesk and this fork
+> are licensed under the **AGPL-3.0**: the complete source of every build we distribute, including our changes, is
+> public here. OPMD is **not** affiliated with or endorsed by RustDesk.
 >
-> **Ce que nous changeons** (tout est regroupé et commenté dans
-> `src/common.rs`, fonction `apply_informatech_defaults`, et dans
-> `.github/workflows/informatech-release.yml`) :
-> - nom d'application `InformaTech` (active le mode « client personnalisé ») ;
-> - sur le poste contrôlé, l'icône de zone de notification et la fenêtre de
->   connexion natives de RustDesk sont masquées : c'est le **hub InformaTech**
->   qui affiche à la place une bannière « InformaTech est connecté » avec un
->   bouton **Couper**. Le consentement et le contrôle de l'utilisateur restent
->   donc visibles, simplement portés par l'interface du hub ;
-> - icônes et métadonnées à la marque InformaTech ;
-> - un workflow GitHub Actions qui ne compile que Windows x64.
+> - **Our branch**: `informatech` (default). **Releases**: `opmd-v<version>` tags, each on the exact commit built.
+> - **What we changed**: see [`NOTICE.md`](NOTICE.md) (dated list of modifications) and `CONTRAT.md`.
+> - **Server**: OPMD only talks to our own ID/relay server (`opmd.informatech-paca.fr`, RustDesk server OSS,
+>   unmodified), never to RustDesk's public servers.
+> - **Access**: password-only; on the client's PC the session and the « end session » control are shown by the
+>   InformaTech hub. Used only for **authorised** support, with the client's consent.
 >
-> Les serveurs publics de RustDesk sont inchangés. Cet outil est destiné à des
-> interventions **autorisées** sur les postes de clients d'InformaTech.
+> *En français : version modifiée de RustDesk par InformaTech (Gap), sous licence AGPL-3.0 ; code source complet
+> de chaque version publiée ici (étiquettes `opmd-v…`) ; liste de nos modifications dans `NOTICE.md`.*
+
+The original RustDesk README follows.
 
 <p align="center">
   <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
