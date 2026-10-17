@@ -1,7 +1,7 @@
 # NOTICE: OPMD (InformaTech Assistance), a modified version of RustDesk
 
 **OPMD** (shown to users as « InformaTech Assistance ») is a modified version of
-[RustDesk](https://github.com/rustdesk/rustdesk), © RustDesk developers (Purslane Ltd and contributors), licensed
+[RustDesk](https://github.com/rustdesk/rustdesk), © RustDesk developers (Purslane Tech Pte. Ltd. and contributors), licensed
 under the **GNU Affero General Public License v3.0** (see `LICENCE`). This fork is maintained by **InformaTech**
 (computer repair, Gap, France) and is distributed under the same licence.
 
@@ -18,7 +18,7 @@ under the **GNU Affero General Public License v3.0** (see `LICENCE`). This fork 
 | Date | Change | Files |
 |---|---|---|
 | 2026-10-14 | Client customisation: app name `InformaTech` (custom-client mode), default options | `src/common.rs` |
-| 2026-10-14 | Icons and executable metadata (InformaTech Assistance) | `res/icon.*`, `res/tray-icon.ico`, `flutter/windows/runner/*`, `flutter/assets/icon.svg` |
+| 2026-10-14 / 15 | Icons and executable metadata (14/10), dedicated « InformaTech Assistance » icon (15/10, D-128) | `res/icon.*`, `res/tray-icon.ico`, `flutter/windows/runner/*`, `flutter/assets/icon.svg` |
 | 2026-10-14 | Windows x64-only release workflow | `.github/workflows/informatech-release.yml` |
 | 2026-10-14 | Fork note in the README; integration sheet `CONTRAT.md` | `README.md`, `CONTRAT.md` |
 | 2026-10-16 | Installed as `InformaTech.exe` with readable Windows names; `opmd-v*` tags and `OPMD-<version>` assets | `src/common.rs`, `src/platform/windows.rs`, workflow |
