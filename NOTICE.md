@@ -17,16 +17,16 @@ under the **GNU Affero General Public License v3.0** (see `LICENCE`). This fork 
 
 | Date | Change | Files |
 |---|---|---|
-| 2026-10-14 | Client customisation: app name `InformaTech` (custom-client mode), default options | `src/common.rs`, `src/core_main.rs` |
+| 2026-10-14 | Client customisation: app name `InformaTech` (custom-client mode), default options | `src/common.rs` |
 | 2026-10-14 | Icons and executable metadata (InformaTech Assistance) | `res/icon.*`, `res/tray-icon.ico`, `flutter/windows/runner/*`, `flutter/assets/icon.svg` |
 | 2026-10-14 | Windows x64-only release workflow | `.github/workflows/informatech-release.yml` |
 | 2026-10-14 | Fork note in the README; integration sheet `CONTRAT.md` | `README.md`, `CONTRAT.md` |
-| 2026-10-16 | Installed as `InformaTech.exe` with readable Windows names; `opmd-v*` tags and `OPMD-<version>` assets | `src/platform/windows.rs`, `libs/portable/*`, workflow |
+| 2026-10-16 | Installed as `InformaTech.exe` with readable Windows names; `opmd-v*` tags and `OPMD-<version>` assets | `src/common.rs`, `src/platform/windows.rs`, workflow |
 | 2026-10-16 | Locked options: password-only access, connection window hidden (the InformaTech hub shows the session and the « end session » control instead) | `src/common.rs` |
 | 2026-10-16 | `--close-connections` command: ends every incoming session | `src/core_main.rs`, `src/common.rs` |
-| 2026-10-16 | Own ID/relay server `opmd.informatech-paca.fr` with its public key, locked, no fallback to RustDesk's public servers | `src/common.rs` |
+| 2026-10-16 | Own ID/relay server `opmd.informatech-paca.fr` with its public key, locked, no fallback to RustDesk's public servers | `src/common.rs`, workflow |
 | 2026-10-16 | Viewer home screen (« Postes accessibles »), Poppins font (SIL OFL 1.1, `flutter/assets/Poppins-OFL.txt`) | `flutter/lib/desktop/pages/opmd_home_page.dart`, `desktop_tab_page.dart`, `flutter/pubspec.yaml`, `flutter/assets/fonts/*` |
-| 2026-10-16 | 0.1.1: setup executable named OPMD / InformaTech Assistance, remote audio locked off | `src/common.rs`, workflow |
+| 2026-10-16 | 0.1.1: setup executable named OPMD / InformaTech Assistance, remote audio locked off | `libs/portable/*`, `src/common.rs`, `opmd_home_page.dart` (footer) |
 
 The full, exact list is `git log 1.5.0..informatech` and `git diff 1.5.0 informatech` in this repository.
 
