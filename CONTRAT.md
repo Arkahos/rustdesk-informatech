@@ -5,8 +5,8 @@ kit, hub Tauri). Décrit le binaire produit par ce dépôt : comment le
 télécharger, l'installer en silencieux, le détecter et le piloter.
 
 > **Naming (16/10/2026)**: the engine is called **OPMD** and is versioned 0.x like
-> every InformaTech project. Next release: **OPMD 0.1.0**, tag `opmd-v0.1.0`
-> (then 0.1.1, …). The earlier pre-release `v1.5.0-informatech.0` stays below as
+> every InformaTech project. Current release: **OPMD 0.1.1**, tag `opmd-v0.1.1`
+> (after 0.1.0). The earlier pre-release `v1.5.0-informatech.0` stays below as
 > history.
 
 ---
@@ -17,22 +17,28 @@ télécharger, l'installer en silencieux, le détecter et le piloter.
 |---|---|
 | Dépôt (public, AGPL-3.0) | https://github.com/Arkahos/rustdesk-informatech |
 | Branche de travail | `informatech` (depuis le tag amont `1.5.0`) |
-| Tag de release | `opmd-vX.Y.Z` (workflow `informatech-release.yml`) ; prochain : `opmd-v0.1.0` |
-| Page de release | https://github.com/Arkahos/rustdesk-informatech/releases/tag/opmd-v0.1.0 |
+| Tag de release | `opmd-vX.Y.Z` (workflow `informatech-release.yml`) ; en cours : `opmd-v0.1.1` |
+| Page de release | https://github.com/Arkahos/rustdesk-informatech/releases/tag/opmd-v0.1.1 |
 
 ### Fichiers de la release (nommage figé dans le workflow)
 
 | Fichier | Rôle |
 |---|---|
-| `OPMD-0.1.0-x86_64.exe` | **Exe à déployer** : installeur portable auto-extractible (« portable packer » amont). C'est ce fichier que le hub télécharge et lance avec `--silent-install`. |
-| `OPMD-0.1.0-x86_64.msi` | Variante MSI (même contenu), fournie si besoin d'un déploiement MSI. |
+| `OPMD-0.1.1-x86_64.exe` | **Exe à déployer** : installeur portable auto-extractible (« portable packer » amont). C'est ce fichier que le hub télécharge et lance avec `--silent-install`. |
+| `OPMD-0.1.1-x86_64.msi` | Variante MSI (même contenu), fournie si besoin d'un déploiement MSI. |
 
 **URL de téléchargement directe de l'exe** :
 ```
-https://github.com/Arkahos/rustdesk-informatech/releases/download/opmd-v0.1.0/OPMD-0.1.0-x86_64.exe
+https://github.com/Arkahos/rustdesk-informatech/releases/download/opmd-v0.1.1/OPMD-0.1.1-x86_64.exe
 ```
 
-SHA-256 of OPMD 0.1.0:
+SHA-256 of OPMD 0.1.1 (engine 52c74700, run 39014047263, pinned 17/10/2026):
+
+```
+e565006b7077f144e46f60fac5cfad89ea8ce83c0e42ea468c80e0534cf6b068  OPMD-0.1.1-x86_64.exe
+```
+
+SHA-256 of OPMD 0.1.0 (history):
 
 ```
 fadf4487c64d590d85c2418e60d506b8e208c217733cd3e5c20b8c5764ec92b4  OPMD-0.1.0-x86_64.exe
