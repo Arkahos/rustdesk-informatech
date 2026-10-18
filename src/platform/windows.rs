@@ -1363,10 +1363,12 @@ pub fn get_silent_install_options(printer_override: Option<bool>) -> &'static st
             printer.as_deref() == Some("1")
         }
     };
+    // InformaTech: OPMD is only installed by the hub for remote help, so the client gets no desktop or Start menu
+    // shortcut (Adrien, 17/10/2026). Uninstall still removes the ones an older OPMD created.
     if install_printer && is_win_10_or_greater() {
-        "desktopicon startmenu printer"
+        "printer"
     } else {
-        "desktopicon startmenu"
+        ""
     }
 }
 
@@ -4759,6 +4761,17 @@ pub(super) fn get_pids_with_first_arg_by_wmic<S1: AsRef<str>, S2: AsRef<str>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn silent_install_creates_no_shortcut() {
+        for printer in [Some(false), Some(true)] {
+            let options = get_silent_install_options(printer);
+            assert!(
+                !options.contains("desktopicon") && !options.contains("startmenu"),
+                "{options}"
+            );
+        }
+    }
 
     // Test-only reusable Win32 HANDLE RAII helper.
     // If a future non-test path needs the same pattern, move it out of this test module.
