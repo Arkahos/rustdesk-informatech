@@ -27,6 +27,7 @@ under the **GNU Affero General Public License v3.0** (see `LICENCE`). This fork 
 | 2026-10-16 | Own ID/relay server `opmd.informatech-paca.fr` with its public key, locked, no fallback to RustDesk's public servers | `src/common.rs`, workflow |
 | 2026-10-16 | Viewer home screen (« Postes accessibles »), Poppins font (SIL OFL 1.1, `flutter/assets/Poppins-OFL.txt`) | `flutter/lib/desktop/pages/opmd_home_page.dart`, `desktop_tab_page.dart`, `flutter/pubspec.yaml`, `flutter/assets/fonts/*` |
 | 2026-10-16 | 0.1.1: setup executable named OPMD / InformaTech Assistance, remote audio locked off | `libs/portable/*`, `src/common.rs`, `opmd_home_page.dart` (footer) |
+| 2026-10-18 | Silent install creates no desktop or Start menu shortcut | `src/platform/windows.rs` |
 
 The full, exact list is `git log 1.5.0..informatech` and `git diff 1.5.0 informatech` in this repository.
 
