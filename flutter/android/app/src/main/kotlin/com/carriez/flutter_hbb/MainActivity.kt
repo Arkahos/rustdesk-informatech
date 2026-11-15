@@ -266,6 +266,10 @@ class MainActivity : FlutterActivity() {
         flutterMethodChannel.setMethodCallHandler { call, result ->
             // make sure result will be invoked, otherwise flutter will await forever
             when (call.method) {
+                // InformaTech (A1): the session handed over by « InformaTech Admin », taken once (ConnexionActivity).
+                "informatech_connexion" -> {
+                    result.success(ConnexionEnAttente.prendre())
+                }
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)

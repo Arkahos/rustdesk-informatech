@@ -19,6 +19,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- InformaTech (A1): only an app signed with the same certificate (« InformaTech Admin ») may start a session. -->
+    <permission
+        android:name="fr.informatech.assistance.permission.CONNECTER"
+        android:protectionLevel="signature" />
+
     <queries>
         <intent>
             <!-- https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs -->
@@ -29,7 +34,7 @@
     <application
         android:name=".MainApplication"
         android:icon="@mipmap/ic_launcher"
-        android:label="RustDesk"
+        android:label="InformaTech Assistance"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true">
 
@@ -74,14 +79,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Intent for deep linking-->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="rustdesk" />
-            </intent-filter>
+            <!-- InformaTech (A1): no rustdesk:// deep link. A session starts only from « InformaTech Admin » through
+                 the guarded alias below (a URI would carry the password into logs, recents and resolvers). -->
         </activity>
+
+        <!-- InformaTech (A1): entry used by « InformaTech Admin » (contract: Hub repo,
+             mobile-admin/plugins/lanceur-visionneuse/src/lib.rs). The real activity is not exported. -->
+        <activity
+            android:name=".ConnexionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@style/Transparent" />
+        <activity-alias
+            android:name="fr.informatech.assistance.ConnexionActivity"
+            android:exported="true"
+            android:permission="fr.informatech.assistance.permission.CONNECTER"
+            android:targetActivity=".ConnexionActivity">
+            <intent-filter>
+                <action android:name="fr.informatech.assistance.action.CONNECTER" />
+                <action android:name="fr.informatech.assistance.action.FERMER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".PermissionRequestTransparentActivity"

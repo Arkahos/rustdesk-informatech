@@ -183,6 +183,10 @@ void runMobileApp() async {
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
   await initUniLinks();
+  // InformaTech (A1): a cold start from « InformaTech Admin » finds its session waiting.
+  if (isAndroid) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => informatechPrendreConnexion());
+  }
 }
 
 void runMultiWindow(

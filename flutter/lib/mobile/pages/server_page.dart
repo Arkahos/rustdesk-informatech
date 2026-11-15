@@ -13,6 +13,7 @@ import '../../common/widgets/dialog.dart';
 import '../../consts.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
+import '../../models/state_model.dart';
 import 'home_page.dart';
 
 class ServerPage extends StatefulWidget implements PageShape {
@@ -892,6 +893,19 @@ class ClientInfo extends StatelessWidget {
   }
 }
 
+/// InformaTech (A1): takes the pending id + one-shot password from Kotlin (once) and connects. Nothing is stored: the
+/// password goes straight to the session, never to the address book or a « remember » option.
+Future<void> informatechPrendreConnexion() async {
+  final c = await platformFFI.invokeMethodWithResult<Map<dynamic, dynamic>>('informatech_connexion');
+  if (c == null) return;
+  final id = c['id'] as String? ?? '';
+  final motDePasse = c['motDePasse'] as String? ?? '';
+  final contexte = globalKey.currentContext;
+  if (id.isEmpty || motDePasse.isEmpty || contexte == null) return;
+  if (!stateGlobal.isInMainPage) closeConnection();
+  connect(contexte, id, password: motDePasse);
+}
+
 void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
     debugPrint("flutter got android msg,$method,$arguments");
@@ -930,6 +944,17 @@ void androidChannelInit() {
             var text = arguments["text"] as String;
             var link = (arguments["link"] ?? '') as String;
             msgBox(gFFI.sessionId, type, title, text, link, gFFI.dialogManager);
+            break;
+          }
+        // InformaTech (A1): a session handed over by « InformaTech Admin » is waiting, or must close.
+        case "informatech_connexion_prete":
+          {
+            informatechPrendreConnexion();
+            break;
+          }
+        case "informatech_fermer":
+          {
+            if (!stateGlobal.isInMainPage) closeConnection();
             break;
           }
         case "stop_service":

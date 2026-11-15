@@ -51,6 +51,9 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
     } else {
         crate::read_custom_client(custom_client_config);
     }
+    // InformaTech (OPMD Android, A1): our server, key and locks win whatever branch ran above. A custom client config
+    // (signed by upstream's key) must never replace OPMD's own ID/relay server.
+    crate::common::apply_informatech_defaults();
     #[cfg(target_os = "android")]
     {
         // flexi_logger can't work when android_logger initialized.
