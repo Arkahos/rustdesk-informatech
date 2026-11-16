@@ -2,11 +2,14 @@
 //! InformaTech Admin serves once (D4, option C). Contract: InformaTech's « A4 §12 » (F1-F5) and Scylla's conditions.
 //!
 //! - Configured by `--informatech-rotation` (elevated), which reads ONE line of JSON `{ "url", "jeton" }` from stdin:
-//!   the token never appears on a command line. `--informatech-rotation --effacer` clears it.
+//!   the token never appears on a command line. `--informatech-rotation --effacer` clears it. The state lives in a
+//!   machine folder, `%ProgramData%\InformaTech\OPMD`, readable by SYSTEM and Administrators only (explicit DACL,
+//!   no inheritance): the elevated kit agent writes it, the SYSTEM service reads it (Argos A12 P2/P3).
 //! - Runs in the `--server` process (SYSTEM), with its state on disk because `--server` is respawned often:
 //!   rotates at start (service start, and after `--close-connections`, which ends `--server`), and 3 minutes after the
 //!   last authorized connection closed by itself (an authorized reconnect within that time cancels it). Never while an
-//!   authorized connection is open.
+//!   authorized connection is open. Every trigger draws a NEW password, even if one is still pending: a pending value
+//!   may already have reached the server and been used (lost 204), so only the 5-minute retry re-POSTs it (Argos P2).
 //! - A new password: 24 characters [A-Za-z0-9] from the OS RNG, applied locally first, kept pending, then POSTed to
 //!   `<url>/v1/acces/mot-de-passe { jeton, motDePasse }`: 204 done; 410/404/401 stop and clear; 400 kept, no retry until
 //!   the next trigger; 429/5xx/network kept, same value retried every 5 minutes, at most 24 hours.
@@ -49,27 +52,23 @@ pub(crate) enum Action {
 }
 
 /// Pure decision. `fin_derniere` = when the authorized-connection count last dropped to 0 (None if none since start).
+/// A trigger (start, end of the grace) always means a NEW password; only the retry timer re-POSTs the pending one.
 pub(crate) fn decider(etat: &Etat, connexions: usize, fin_derniere: Option<u64>, maintenant: u64, demarrage: bool) -> Action {
     if connexions > 0 {
         return Action::Rien;
     }
-    let declencheur = demarrage || fin_derniere.is_some_and(|t| maintenant >= t + GRACE_S);
-    if etat.en_attente.is_some() {
-        let depuis = etat.depuis.unwrap_or(maintenant);
-        if maintenant.saturating_sub(depuis) >= PLAFOND_S && !declencheur {
-            return Action::Rien;
-        }
-        if etat.suspendu && !declencheur {
-            return Action::Rien;
-        }
-        let dernier = etat.dernier_essai.unwrap_or(0);
-        if declencheur || maintenant >= dernier + REESSAI_S {
-            return Action::Reessayer;
-        }
+    if demarrage || fin_derniere.is_some_and(|t| maintenant >= t + GRACE_S) {
+        return Action::Tourner;
+    }
+    if etat.en_attente.is_none() || etat.suspendu {
         return Action::Rien;
     }
-    if declencheur {
-        Action::Tourner
+    let depuis = etat.depuis.unwrap_or(maintenant);
+    if maintenant.saturating_sub(depuis) >= PLAFOND_S {
+        return Action::Rien;
+    }
+    if maintenant >= etat.dernier_essai.unwrap_or(0) + REESSAI_S {
+        Action::Reessayer
     } else {
         Action::Rien
     }
@@ -129,8 +128,29 @@ fn maintenant() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+fn dossier() -> PathBuf {
+    let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    base.join("InformaTech").join("OPMD")
+}
+
 fn chemin() -> PathBuf {
-    Config::path(FICHIER)
+    dossier().join(FICHIER)
+}
+
+/// SYSTEM (S-1-5-18) and Administrators (S-1-5-32-544) only, inheritance from ProgramData removed. Only a path goes on
+/// icacls's command line, never a secret.
+fn proteger(d: &std::path::Path) -> ResultType<()> {
+    let ok = std::process::Command::new("icacls")
+        .arg(d)
+        .args(["/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?
+        .success();
+    if !ok {
+        hbb_common::anyhow::bail!("icacls failed");
+    }
+    Ok(())
 }
 
 fn lire() -> Option<Etat> {
@@ -139,10 +159,11 @@ fn lire() -> Option<Etat> {
 }
 
 fn ecrire(e: &Etat) -> ResultType<()> {
+    let d = dossier();
+    std::fs::create_dir_all(&d)?;
+    // Before anything secret is written: the folder must be closed to everyone but SYSTEM and Administrators.
+    proteger(&d)?;
     let p = chemin();
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d)?;
-    }
     let tmp = p.with_extension("tmp");
     std::fs::write(&tmp, serde_json::to_vec(e)?)?;
     std::fs::rename(&tmp, &p)?;
@@ -212,6 +233,7 @@ pub(crate) fn pas(etat: Etat, action: Action, maintenant: u64, effets: &mut impl
                 return Some(e);
             }
             journal("new password applied locally");
+            // A previous pending value is dropped: it may already be in use (lost 204).
             e.en_attente = Some(mdp);
             e.depuis = Some(maintenant);
             e.suspendu = false;
@@ -280,7 +302,7 @@ pub fn demarrer(nb_connexions: fn() -> usize) {
             if let Some(e) = lire() {
                 let action = decider(&e, n, fin_derniere, t, demarrage);
                 if action != Action::Rien {
-                    if action == Action::Tourner || demarrage || fin_derniere.is_some() {
+                    if action == Action::Tourner {
                         fin_derniere = None;
                     }
                     match pas(e, action, t, &mut Reels) {
@@ -377,13 +399,30 @@ mod tests {
         e.depuis = Some(0);
         e.dernier_essai = Some(1000);
         assert_eq!(decider(&e, 0, None, 1000 + 299, false), Action::Rien);
-        assert_eq!(decider(&e, 0, None, 1000 + 300, false), Action::Reessayer);
+        assert_eq!(decider(&e, 0, None, 1000 + 300, false), Action::Reessayer, "the timer re-POSTs the pending value");
         assert_eq!(decider(&e, 0, None, PLAFOND_S + 10, false), Action::Rien, "past 24 h: wait for a trigger");
-        assert_eq!(decider(&e, 0, None, PLAFOND_S + 10, true), Action::Reessayer, "a trigger retries the SAME value");
         e.suspendu = true;
         e.depuis = Some(1000);
         assert_eq!(decider(&e, 0, None, 1000 + 600, false), Action::Rien, "400: until the next trigger");
-        assert_eq!(decider(&e, 0, Some(1000), 1000 + 600, false), Action::Reessayer);
+    }
+
+    #[test]
+    fn un_declencheur_tire_toujours_un_nouveau_mot_de_passe() {
+        // Argos P2: a pending value may have reached the server (lost 204) and been used for a session.
+        let mut e = configure();
+        e.en_attente = Some("X".repeat(24));
+        e.depuis = Some(1000);
+        e.dernier_essai = Some(1000);
+        assert_eq!(decider(&e, 0, None, 1001, true), Action::Tourner, "start");
+        assert_eq!(decider(&e, 0, Some(2000), 2180, false), Action::Tourner, "end of the grace");
+        e.suspendu = true;
+        assert_eq!(decider(&e, 0, None, 1001, true), Action::Tourner, "a 400 is lifted by a trigger with a new value");
+        let mut f = faux(vec![Some(204)]);
+        let n = pas(e, Action::Tourner, 3000, &mut f).unwrap();
+        assert_eq!(f.appliques.len(), 1);
+        assert_ne!(f.appliques[0], "X".repeat(24), "a new value, applied locally");
+        assert_eq!(f.postes, f.appliques, "and that new value is the one posted");
+        assert!(n.en_attente.is_none() && !n.suspendu);
     }
 
     #[test]
