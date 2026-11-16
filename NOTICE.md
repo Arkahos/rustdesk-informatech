@@ -28,12 +28,14 @@ under the **GNU Affero General Public License v3.0** (see `LICENCE`). This fork 
 | 2026-10-16 | Viewer home screen (« Postes accessibles »), Poppins font (SIL OFL 1.1, `flutter/assets/Poppins-OFL.txt`) | `flutter/lib/desktop/pages/opmd_home_page.dart`, `desktop_tab_page.dart`, `flutter/pubspec.yaml`, `flutter/assets/fonts/*` |
 | 2026-10-16 | 0.1.1: setup executable named OPMD / InformaTech Assistance, remote audio locked off | `libs/portable/*`, `src/common.rs`, `opmd_home_page.dart` (footer) |
 | 2026-10-18 | Silent install creates no desktop or Start menu shortcut | `src/platform/windows.rs` |
+| 2026-11-16 | Android viewer « InformaTech Assistance » (app id `fr.informatech.assistance`, 0.1.0): session started only from « InformaTech Admin » through a signature-protected entry (no `rustdesk://` link), viewer only (screen capture, accessibility input, boot start, floating window, microphone, camera removed), no file transfer or voice call, « en attente » home, foreground service during a session, peer files cleared after each session, OPMD server re-applied in every start path, InformaTech icon and splash, graphite look | `flutter/android/app/**`, `flutter/lib/main.dart`, `flutter/lib/common.dart`, `flutter/lib/mobile/**`, `src/common.rs`, `src/flutter_ffi.rs` |
 
-The full, exact list is `git log 1.5.0..informatech` and `git diff 1.5.0 informatech` in this repository.
+The full, exact list is `git log 1.5.0..informatech-android` and `git diff 1.5.0 informatech-android` in this repository.
 
 ## Third-party components added by us
 
 - **Poppins** font, © Indian Type Foundry, SIL Open Font License 1.1 (`flutter/assets/Poppins-OFL.txt`).
+- **Lucide** icon `monitor-smartphone` (Android home screen), © Lucide Icons and Contributors, ISC License (`flutter/assets/Lucide-LICENSE.txt`, which also carries the MIT notice of the Feather-derived icons).
 
 ## Intended use
 
