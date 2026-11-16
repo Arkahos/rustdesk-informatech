@@ -137,31 +137,116 @@ fn chemin() -> PathBuf {
     dossier().join(FICHIER)
 }
 
-/// SYSTEM (S-1-5-18) and Administrators (S-1-5-32-544) only, inheritance from ProgramData removed. Only a path goes on
-/// icacls's command line, never a secret.
-fn proteger(d: &std::path::Path) -> ResultType<()> {
-    let ok = std::process::Command::new("icacls")
-        .arg(d)
-        .args(["/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"])
+/// Who owns a folder or file of the state (Argos A12 re-check 2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Proprietaire {
+    Systeme,
+    Administrateurs,
+    Autre,
+    Inconnu,
+}
+
+/// The service trusts a folder or file only if it is no junction/symlink and SYSTEM or Administrators own it: under
+/// ProgramData a standard user may create the folder first (keeping WRITE_DAC as its owner) or plant a junction.
+pub(crate) fn digne_de_confiance(reparse: bool, proprietaire: Proprietaire) -> bool {
+    !reparse && matches!(proprietaire, Proprietaire::Systeme | Proprietaire::Administrateurs)
+}
+
+fn est_reparse(p: &std::path::Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    // FILE_ATTRIBUTE_REPARSE_POINT; unreadable counts as untrusted.
+    std::fs::symlink_metadata(p).map(|m| m.file_attributes() & 0x400 != 0).unwrap_or(true)
+}
+
+fn proprietaire(p: &std::path::Path) -> Proprietaire {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows::Win32::Security::{IsWellKnownSid, WinBuiltinAdministratorsSid, WinLocalSystemSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+    let chemin = HSTRING::from(p.as_os_str());
+    let mut owner = PSID::default();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: out-pointers to locals; the descriptor is freed below and `owner` points into it.
+    let r = unsafe { GetNamedSecurityInfoW(&chemin, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, Some(&mut owner), None, None, None, &mut sd) };
+    if r.0 != 0 || owner.is_invalid() {
+        return Proprietaire::Inconnu;
+    }
+    // SAFETY: `owner` is valid while `sd` lives.
+    let resultat = unsafe {
+        if IsWellKnownSid(owner, WinLocalSystemSid).as_bool() {
+            Proprietaire::Systeme
+        } else if IsWellKnownSid(owner, WinBuiltinAdministratorsSid).as_bool() {
+            Proprietaire::Administrateurs
+        } else {
+            Proprietaire::Autre
+        }
+    };
+    // SAFETY: `sd` was allocated by GetNamedSecurityInfoW with LocalAlloc.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(sd.0)));
+    }
+    resultat
+}
+
+fn fiable(p: &std::path::Path) -> bool {
+    digne_de_confiance(est_reparse(p), proprietaire(p))
+}
+
+/// The state's folders and file, from the top, all trusted.
+fn etat_fiable() -> bool {
+    let d = dossier();
+    d.parent().is_some_and(fiable) && fiable(&d) && fiable(&chemin())
+}
+
+fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
+    std::process::Command::new(programme)
+        .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()?
-        .success();
-    if !ok {
-        hbb_common::anyhow::bail!("icacls failed");
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Elevated writer: each level (`InformaTech`, then `OPMD`) is a real folder (a junction is removed, not followed),
+/// owned by Administrators, with exactly two ACEs: SYSTEM and Administrators, nothing inherited. Only paths go on the
+/// command lines, never a secret. Refuses if the result is still not trusted.
+fn proteger(d: &std::path::Path) -> ResultType<()> {
+    let niveaux = [d.parent().map(|x| x.to_path_buf()), Some(d.to_path_buf())];
+    for n in niveaux.into_iter().flatten() {
+        if std::fs::symlink_metadata(&n).is_ok() && est_reparse(&n) {
+            // remove_dir on a junction removes the link itself.
+            std::fs::remove_dir(&n)?;
+        }
+        std::fs::create_dir_all(&n)?;
+        let c = n.as_os_str();
+        let ok = commande_ok("takeown", &[std::ffi::OsStr::new("/F"), c, std::ffi::OsStr::new("/A")])
+            && commande_ok("icacls", &[c, std::ffi::OsStr::new("/reset")])
+            && commande_ok(
+                "icacls",
+                &[c, std::ffi::OsStr::new("/inheritance:r"), std::ffi::OsStr::new("/grant:r"), std::ffi::OsStr::new("*S-1-5-18:(OI)(CI)F"), std::ffi::OsStr::new("*S-1-5-32-544:(OI)(CI)F")],
+            );
+        if !ok || !fiable(&n) {
+            hbb_common::anyhow::bail!("state folder not trusted");
+        }
     }
     Ok(())
 }
 
 fn lire() -> Option<Etat> {
+    if std::fs::symlink_metadata(chemin()).is_err() {
+        return None;
+    }
+    if !etat_fiable() {
+        journal("state file ignored: folder or file not owned by SYSTEM/Administrators, or a link");
+        return None;
+    }
     let texte = std::fs::read_to_string(chemin()).ok()?;
     serde_json::from_str(&texte).ok()
 }
 
 fn ecrire(e: &Etat) -> ResultType<()> {
     let d = dossier();
-    std::fs::create_dir_all(&d)?;
-    // Before anything secret is written: the folder must be closed to everyone but SYSTEM and Administrators.
+    // Before anything secret is written: real folders, owned by Administrators, closed to everyone else.
     proteger(&d)?;
     let p = chemin();
     let tmp = p.with_extension("tmp");
@@ -423,6 +508,30 @@ mod tests {
         assert_ne!(f.appliques[0], "X".repeat(24), "a new value, applied locally");
         assert_eq!(f.postes, f.appliques, "and that new value is the one posted");
         assert!(n.en_attente.is_none() && !n.suspendu);
+    }
+
+    #[test]
+    fn dossier_fiable_seulement_sans_lien_et_a_systeme_ou_admins() {
+        use Proprietaire::*;
+        assert!(digne_de_confiance(false, Systeme));
+        assert!(digne_de_confiance(false, Administrateurs));
+        assert!(!digne_de_confiance(false, Autre), "created first by a standard user");
+        assert!(!digne_de_confiance(false, Inconnu));
+        assert!(!digne_de_confiance(true, Systeme), "a junction, whoever owns it");
+        assert!(!digne_de_confiance(true, Administrateurs));
+    }
+
+    #[test]
+    fn proprietaires_reels() {
+        // ProgramData belongs to SYSTEM; a folder the test user creates belongs to that user.
+        assert_eq!(proprietaire(std::path::Path::new(r"C:\ProgramData")), Proprietaire::Systeme);
+        let d = std::env::temp_dir().join(format!("a12-proprio-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(proprietaire(&d), Proprietaire::Autre);
+        assert!(!fiable(&d));
+        assert!(!est_reparse(&d));
+        std::fs::remove_dir(&d).unwrap();
+        assert!(est_reparse(&d), "missing counts as untrusted");
     }
 
     #[test]
