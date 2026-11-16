@@ -9,6 +9,7 @@ import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
 import 'informatech_attente_page.dart';
+import '../informatech_textes.dart';
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -114,6 +115,8 @@ class HomePageState extends State<HomePage> {
   }
 
   Widget appTitle() {
+    // InformaTech (A1, Gon): the product name D-128 in the app bar.
+    if (isAndroid) return const Text(Textes.nomApp);
     final currentUser = gFFI.chatModel.currentUser;
     final currentKey = gFFI.chatModel.currentKey;
     if (isChatPageCurrentTab &&
