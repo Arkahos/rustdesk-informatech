@@ -656,6 +656,10 @@ fn run(vs: VideoService) -> ResultType<()> {
     );
     let client_record = video_qos.record();
     drop(video_qos);
+    // InformaTech (Styx 16/11): refused in code, not only by the forced option (S-072 showed options can be
+    // bypassed): neither the PC's own auto-record nor a recording asked by the viewer ever starts here.
+    let record_incoming = crate::common::informatech_enregistrement(record_incoming);
+    let client_record = crate::common::informatech_enregistrement(client_record);
     let (mut encoder, encoder_cfg, codec_format, use_i444, recorder) = match setup_encoder(
         &c,
         sp.name(),

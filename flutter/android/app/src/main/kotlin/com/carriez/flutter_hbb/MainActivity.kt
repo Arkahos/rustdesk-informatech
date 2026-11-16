@@ -229,7 +229,10 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         // InformaTech (Styx 16/11, Luffy): the session view shows the client's screen. FLAG_SECURE on the whole
         // window: no recent-apps thumbnail, no OS screenshot, no screen recording or casting of it.
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        // Waived in the debug build type only (InformatechFenetre.kt of each build type; false in release/profile).
+        if (!InformatechFenetre.CAPTURE_ECRAN_AUTORISEE_BUILD_DEBUG_SEULEMENT) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
