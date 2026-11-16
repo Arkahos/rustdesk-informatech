@@ -29,6 +29,7 @@ import 'mobile/pages/home_page.dart';
 import 'mobile/pages/server_page.dart';
 import 'mobile/widgets/deploy_dialog.dart';
 import 'models/platform_model.dart';
+import 'mobile/informatech_charte.dart';
 
 /// Basic window and launch properties.
 int? kWindowId;
@@ -504,9 +505,10 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           title: isWeb
               ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
               : bind.mainGetAppNameSync(),
-          theme: MyTheme.lightTheme,
-          darkTheme: MyTheme.darkTheme,
-          themeMode: MyTheme.currentThemeMode(),
+          // InformaTech (A1, D-229): the Android viewer is graphite whatever the system theme, like InformaTech Admin.
+          theme: isAndroid ? Charte.theme() : MyTheme.lightTheme,
+          darkTheme: isAndroid ? Charte.theme() : MyTheme.darkTheme,
+          themeMode: isAndroid ? ThemeMode.dark : MyTheme.currentThemeMode(),
           home: isDesktop
               ? const DesktopTabPage()
               : isWeb

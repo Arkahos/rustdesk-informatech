@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#FF0071FF</color>
+    <color name="primary">#FF6FF3D6</color>
+    <!-- InformaTech (A1, D-229): graphite background of the Hub charter, behind Flutter before its first frame. -->
+    <color name="informatech_fond">#FF141415</color>
 </resources>
