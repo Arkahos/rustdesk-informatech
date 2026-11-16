@@ -2580,6 +2580,8 @@ connect(BuildContext context, String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (id == '') return;
+  // InformaTech (A1, D10): no file transfer from the Android viewer, whatever path asks for it.
+  if (isAndroid && isFileTransfer) return;
   if (!isDesktop || desktopType == DesktopType.main) {
     try {
       if (Get.isRegistered<IDTextEditingController>()) {

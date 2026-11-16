@@ -637,7 +637,8 @@ class MainActivity : FlutterActivity() {
                 GET_VALUE -> {
                     if (call.arguments is String) {
                         if (call.arguments == KEY_IS_SUPPORT_VOICE_CALL) {
-                            result.success(isSupportVoiceCall())
+                            // InformaTech (A1, D10): text chat only, no voice call from the viewer.
+                            result.success(false)
                         } else {
                             result.error("-1", "No such key", null)
                         }
