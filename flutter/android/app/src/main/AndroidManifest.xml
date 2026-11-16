@@ -24,6 +24,8 @@
         android:protectionLevel="signature" />
 
     <queries>
+        <!-- InformaTech (D10): the viewer may see (and bring to the front) « InformaTech Admin », nothing else. -->
+        <package android:name="fr.informatech.admin" />
         <intent>
             <!-- https://developer.android.com/training/package-visibility/use-cases#open-urls-custom-tabs -->
             <action android:name="android.support.customtabs.action.CustomTabsService" />

@@ -462,9 +462,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     return h.isEmpty ? widget.id : h;
   }
 
+  /// « Terminer » (Luffy 16/11, option A): the viewer disconnects, then brings « InformaTech Admin » to the front, where
+  /// « Terminer la session » closes the session on the server. Left alone, the server's stale sweep closes it about
+  /// 60 s after the PC stops seeing the connection; until then a second open on that access is refused (D14).
   void _itTerminer() {
     setState(() => _itConfirme = false);
     closeConnection();
+    platformFFI.invokeMethod('informatech_ouvrir_admin');
   }
 
   /// Bottom of the scaffold: the tools in portrait, only the « Terminer » confirmation in landscape (tools = rail).

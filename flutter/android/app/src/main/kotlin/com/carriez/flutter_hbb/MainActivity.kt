@@ -46,6 +46,8 @@ import java.io.FileOutputStream
 class MainActivity : FlutterActivity() {
     companion object {
         var flutterMethodChannel: MethodChannel? = null
+        /** InformaTech (D10): « InformaTech Admin », the only app the viewer ever opens. */
+        private const val PAQUET_ADMIN = "fr.informatech.admin"
         private var _rdClipboardManager: RdClipboardManager? = null
         val rdClipboardManager: RdClipboardManager?
             get() = _rdClipboardManager;
@@ -269,6 +271,13 @@ class MainActivity : FlutterActivity() {
                 // InformaTech (A1): the session handed over by « InformaTech Admin », taken once (ConnexionActivity).
                 "informatech_connexion" -> {
                     result.success(ConnexionEnAttente.prendre())
+                }
+                // InformaTech (D10): after « Terminer », bring « InformaTech Admin » to the front, where « Terminer la
+                // session » is. A plain launcher intent: no data, no extra, no new exported component on either side.
+                "informatech_ouvrir_admin" -> {
+                    val i = packageManager.getLaunchIntentForPackage(PAQUET_ADMIN)
+                    if (i != null) startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    result.success(i != null)
                 }
                 // InformaTech (A11, D17): foreground service while a remote page is open.
                 "informatech_session" -> {
