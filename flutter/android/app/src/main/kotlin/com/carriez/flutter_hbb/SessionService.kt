@@ -32,7 +32,7 @@ class SessionService : Service() {
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CANAL) else Notification.Builder(this)
         val n = b.setContentTitle("Session InformaTech en cours")
             .setContentText("Touchez pour revenir à la session.")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_logo)
             .setOngoing(true)
             .setContentIntent(ouvrir)
             .build()
