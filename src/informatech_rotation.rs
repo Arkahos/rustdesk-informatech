@@ -13,7 +13,7 @@
 //! - Logs carry fixed event names only (`journal` takes `&'static str`): never the token, the URL or a password.
 
 use hbb_common::{config::Config, rand::rngs::OsRng, rand::RngCore, ResultType};
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
