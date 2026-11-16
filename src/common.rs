@@ -2465,9 +2465,9 @@ pub(crate) const INFORMATECH_PERMISSIONS_REFUSEES: &[&str] = &[
     keys::OPTION_ENABLE_CAMERA,
     keys::OPTION_ENABLE_AUDIO,
 ];
-/// InformaTech (S-072): file transfer, its own line. Open today: Adrien is asked whether he uses it by hand from the
-/// Windows viewer (no Hub code path does). `true` refuses it like the kinds above.
-pub(crate) const INFORMATECH_REFUSE_TRANSFERT_FICHIERS: bool = false;
+/// InformaTech (S-072): file transfer, its own line. Refused since Adrien's answer (16/11, via Yoda): he does not use
+/// OPMD file transfer during Hub sessions, and no Hub code path does. `false` would accept it again (one line).
+pub(crate) const INFORMATECH_REFUSE_TRANSFERT_FICHIERS: bool = true;
 
 /// True when the PC engine must refuse `option` (an `enable-…` key). Pure: the list is compiled in.
 pub(crate) fn informatech_permission_refusee(option: &str) -> bool {

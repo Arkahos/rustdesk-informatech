@@ -7237,6 +7237,15 @@ mod test {
             assert!(Connection::is_permission_enabled_locally(keys::OPTION_ENABLE_KEYBOARD));
         }
         verifier("access-mode=full, options Y");
+        // File transfer (Adrien 16/11 via Yoda: not used): refused the same way, in full-access mode, with the
+        // option set to Y and with a server grant, as long as its switch is on.
+        if crate::common::INFORMATECH_REFUSE_TRANSFERT_FICHIERS {
+            let _fichiers = OptionsForcees::poser(&[(keys::OPTION_ENABLE_FILE_TRANSFER, "Y")]);
+            assert!(Connection::informatech_login_refuse(keys::OPTION_ENABLE_FILE_TRANSFER));
+            assert!(!Connection::permission(keys::OPTION_ENABLE_FILE_TRANSFER, &None));
+            assert!(!Connection::permission(keys::OPTION_ENABLE_FILE_TRANSFER, &tout_accorde));
+            assert!(!Connection::is_permission_enabled_locally(keys::OPTION_ENABLE_FILE_TRANSFER));
+        }
         drop(_options);
         assert_eq!(Config::get_option("access-mode"), "");
         // The screen session's own permissions still follow the server grant.
