@@ -2437,6 +2437,37 @@ pub(crate) fn informatech_viewer_ignore(data: &crate::client::Data) -> bool {
     )
 }
 
+/// InformaTech (S-072): what a technician may never get from the client's PC, whoever asks and whatever the stored
+/// config, an `--option`, the access mode or the rendezvous server's control permissions say. The product is « see and
+/// control the screen, with the client's banner »: no TCP tunnel / RDP (`enable-tunnel` covers both), no remote
+/// terminal, no camera, and no audio (OPMD 0.1.1: echo on the client's call).
+pub(crate) const INFORMATECH_PERMISSIONS_REFUSEES: &[&str] = &[
+    keys::OPTION_ENABLE_TUNNEL,
+    keys::OPTION_ENABLE_TERMINAL,
+    keys::OPTION_ENABLE_CAMERA,
+    keys::OPTION_ENABLE_AUDIO,
+];
+/// InformaTech (S-072): file transfer, its own line. Open today: Adrien is asked whether he uses it by hand from the
+/// Windows viewer (no Hub code path does). `true` refuses it like the kinds above.
+pub(crate) const INFORMATECH_REFUSE_TRANSFERT_FICHIERS: bool = false;
+
+/// True when the PC engine must refuse `option` (an `enable-…` key). Pure: the list is compiled in.
+pub(crate) fn informatech_permission_refusee(option: &str) -> bool {
+    INFORMATECH_PERMISSIONS_REFUSEES.contains(&option)
+        || (INFORMATECH_REFUSE_TRANSFERT_FICHIERS && option == keys::OPTION_ENABLE_FILE_TRANSFER)
+}
+
+/// The `enable-…` options written as « N » into OVERWRITE_SETTINGS, so every reader of the option (UI, --cm window,
+/// IPC) sees the refusal too. The decision itself is `informatech_permission_refusee`, checked first by
+/// `Connection::permission` and `Connection::is_permission_enabled_locally`.
+pub(crate) fn informatech_permissions_forcees() -> Vec<&'static str> {
+    let mut v = INFORMATECH_PERMISSIONS_REFUSEES.to_vec();
+    if INFORMATECH_REFUSE_TRANSFERT_FICHIERS {
+        v.push(keys::OPTION_ENABLE_FILE_TRANSFER);
+    }
+    v
+}
+
 pub(crate) fn apply_informatech_defaults() {
     // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
     // ce qui évite de modifier (et donc de forker) le sous-module hbb_common.
@@ -2463,8 +2494,10 @@ pub(crate) fn apply_informatech_defaults() {
     forces.insert("custom-rendezvous-server".to_owned(), OPMD_SERVER.to_owned());
     forces.insert(keys::OPTION_RELAY_SERVER.to_owned(), OPMD_SERVER.to_owned());
     forces.insert("key".to_owned(), OPMD_SERVER_KEY.to_owned());
-    // OPMD 0.1.1: no remote audio. The live trial with a client on a Discord call gave an echo.
-    forces.insert(keys::OPTION_ENABLE_AUDIO.to_owned(), "N".to_owned());
+    // OPMD 0.1.1: no remote audio (echo on a client's Discord call). S-072: no tunnel / RDP, terminal or camera.
+    for option in informatech_permissions_forcees() {
+        forces.insert(option.to_owned(), "N".to_owned());
+    }
 }
 
 /// InformaTech: `--close-connections`, used by the hub's « Terminer la session » on the client's PC. Killing the
@@ -3099,6 +3132,32 @@ mod tests {
         }
         // This test runs on the host, which is never the viewer.
         assert!(!INFORMATECH_VIEWER);
+    }
+
+    #[test]
+    fn informatech_s072_refused_permissions() {
+        for refuse in [
+            keys::OPTION_ENABLE_TUNNEL,
+            keys::OPTION_ENABLE_TERMINAL,
+            keys::OPTION_ENABLE_CAMERA,
+            keys::OPTION_ENABLE_AUDIO,
+        ] {
+            assert!(informatech_permission_refusee(refuse), "{refuse}");
+            assert!(informatech_permissions_forcees().contains(&refuse), "{refuse}");
+        }
+        // What the product uses stays open.
+        for permis in [keys::OPTION_ENABLE_KEYBOARD, keys::OPTION_ENABLE_CLIPBOARD] {
+            assert!(!informatech_permission_refusee(permis), "{permis}");
+        }
+        // File transfer follows its own switch, in the decision and in the forced options alike.
+        assert_eq!(
+            informatech_permission_refusee(keys::OPTION_ENABLE_FILE_TRANSFER),
+            INFORMATECH_REFUSE_TRANSFERT_FICHIERS
+        );
+        assert_eq!(
+            informatech_permissions_forcees().contains(&keys::OPTION_ENABLE_FILE_TRANSFER),
+            INFORMATECH_REFUSE_TRANSFERT_FICHIERS
+        );
     }
 
     #[test]

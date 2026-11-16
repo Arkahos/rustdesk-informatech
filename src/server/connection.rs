@@ -2627,6 +2627,10 @@ impl Connection {
 
     #[inline]
     pub fn is_permission_enabled_locally(enable_prefix_option: &str) -> bool {
+        // InformaTech (S-072): refused kinds stay refused in « full access » mode and whatever the config says.
+        if crate::common::informatech_permission_refusee(enable_prefix_option) {
+            return false;
+        }
         #[cfg(feature = "flutter")]
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
@@ -2648,6 +2652,12 @@ impl Connection {
         control_permissions: &Option<ControlPermissions>,
     ) -> bool {
         use hbb_common::rendezvous_proto::control_permissions::Permission;
+        // InformaTech (S-072): refused kinds are refused before the rendezvous server's control permissions are read,
+        // so no server answer can grant a tunnel, a terminal, the camera or audio. Every login kind and every
+        // in-session request goes through here.
+        if crate::common::informatech_permission_refusee(enable_prefix_option) {
+            return false;
+        }
         if let Some(control_permissions) = control_permissions {
             let permission = match enable_prefix_option {
                 keys::OPTION_ENABLE_KEYBOARD => Some(Permission::keyboard),
@@ -7123,6 +7133,41 @@ mod test {
 
     fn unauthorized_count() -> usize {
         UNAUTHORIZED_CONNS.lock().unwrap().len()
+    }
+
+    /// InformaTech (S-072): the decision each login kind takes in `on_message` (`if !Self::permission(…) { "No
+    /// permission of …"; return false }`), with no server grant, and with a server granting everything.
+    #[test]
+    fn informatech_s072_login_kinds_refused() {
+        // Every permission « enabled » (2 bits each = 0b10) as a rendezvous server could send it.
+        let tout_accorde = Some(ControlPermissions {
+            permissions: 0xAAAA_AAAA_AAAA_AAAA,
+            ..Default::default()
+        });
+        assert_eq!(
+            crate::get_control_permission(
+                0xAAAA_AAAA_AAAA_AAAA,
+                hbb_common::rendezvous_proto::control_permissions::Permission::tunnel
+            ),
+            Some(true)
+        );
+        for (genre, option) in [
+            ("port forward / RDP login", keys::OPTION_ENABLE_TUNNEL),
+            ("terminal login", keys::OPTION_ENABLE_TERMINAL),
+            ("camera login", keys::OPTION_ENABLE_CAMERA),
+            ("audio", keys::OPTION_ENABLE_AUDIO),
+        ] {
+            assert!(!Connection::permission(option, &None), "{genre}");
+            assert!(!Connection::permission(option, &tout_accorde), "{genre}, server grant");
+            assert!(!Connection::is_permission_enabled_locally(option), "{genre}, local");
+        }
+        // The screen session's own permissions still follow the server grant.
+        assert!(Connection::permission(keys::OPTION_ENABLE_KEYBOARD, &tout_accorde));
+        // File transfer: its own switch (open until Adrien answers).
+        assert_eq!(
+            Connection::permission(keys::OPTION_ENABLE_FILE_TRANSFER, &tout_accorde),
+            !crate::common::INFORMATECH_REFUSE_TRANSFERT_FICHIERS
+        );
     }
 
     #[test]
