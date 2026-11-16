@@ -102,8 +102,10 @@ android {
         applicationId "fr.informatech.assistance"  // InformaTech (A1); Kotlin namespace unchanged
         minSdkVersion 22
         targetSdkVersion 36
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
+        // InformaTech: the Android viewer is versioned on its own, 0.x until Adrien says V1 (pubspec stays upstream's for
+        // the desktop build). Bump both together for each APK handed to Adrien.
+        versionCode 1
+        versionName "0.1.0"
     }
 
     signingConfigs {
