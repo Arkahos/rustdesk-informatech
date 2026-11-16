@@ -946,7 +946,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                     },
             ),
           ]),
-        if (isAndroid)
+        if (isAndroid && !kInformatechSansCapture)
           SettingsSection(
             title: Text(translate("Recording")),
             tiles: [

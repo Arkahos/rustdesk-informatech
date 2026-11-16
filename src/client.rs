@@ -2774,6 +2774,9 @@ impl VideoHandler {
 
     /// Start or stop screen record.
     pub fn record_screen(&mut self, start: bool, id: String, display_idx: usize, camera: bool) {
+        // InformaTech (Styx 16/11, Scylla S-077): the one door every caller goes through (the manual order, and the
+        // first-frame start when record_state && record_permission): a recording never starts.
+        let start = crate::common::informatech_enregistrement(start);
         self.record = false;
         if start {
             self.recorder = Recorder::new(RecorderContext {
@@ -5974,5 +5977,19 @@ mod kx_tests {
         let (seen, decrypted) = handshake(KX_VERSION_LATEST, Some(0)).await;
         assert_eq!(seen.picked, 1);
         assert!(!seen.decrypted && !decrypted);
+    }
+}
+
+#[cfg(test)]
+mod informatech_capture_tests {
+    use super::*;
+
+    /// S-077: asking the viewer's video handler to record leaves it without a recorder, whoever asks.
+    #[test]
+    fn informatech_video_handler_never_records() {
+        let mut h = VideoHandler::new(CodecFormat::VP9, 0);
+        h.record_screen(true, "123456789".to_owned(), 0, false);
+        assert!(h.recorder.lock().unwrap().is_none());
+        assert!(!h.record);
     }
 }

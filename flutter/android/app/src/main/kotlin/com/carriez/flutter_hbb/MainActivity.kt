@@ -44,6 +44,24 @@ import java.io.FileOutputStream
 
 
 class MainActivity : FlutterActivity() {
+    /** InformaTech: a fixed mark over every screen of a debug build, the only build whose window can be captured. */
+    private fun informatechMarqueDebug() {
+        val marque = android.widget.TextView(this)
+        marque.text = "BUILD DEBUG · captures d’écran possibles"
+        marque.textSize = 10f
+        marque.setTextColor(0xFFFF8A80.toInt())
+        marque.setBackgroundColor(0xB3000000.toInt())
+        marque.setPadding(16, 4, 16, 4)
+        addContentView(
+            marque,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+            )
+        )
+    }
+
     companion object {
         var flutterMethodChannel: MethodChannel? = null
         /** InformaTech (D10): « InformaTech Admin », the only app the viewer ever opens. */
@@ -233,6 +251,7 @@ class MainActivity : FlutterActivity() {
         if (!InformatechFenetre.CAPTURE_ECRAN_AUTORISEE_BUILD_DEBUG_SEULEMENT) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         }
+        if (InformatechFenetre.CAPTURE_ECRAN_AUTORISEE_BUILD_DEBUG_SEULEMENT) informatechMarqueDebug()
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)

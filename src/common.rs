@@ -2473,6 +2473,7 @@ pub(crate) const INFORMATECH_REFUSE_TRANSFERT_FICHIERS: bool = false;
 pub(crate) fn informatech_permission_refusee(option: &str) -> bool {
     INFORMATECH_PERMISSIONS_REFUSEES.contains(&option)
         || (INFORMATECH_REFUSE_TRANSFERT_FICHIERS && option == keys::OPTION_ENABLE_FILE_TRANSFER)
+        || (INFORMATECH_SANS_CAPTURE && option == keys::OPTION_ENABLE_RECORD_SESSION)
 }
 
 /// What a switch of the client's connection window (--cm) may set for `option`: what was asked, never « on » for a
@@ -2488,6 +2489,9 @@ pub(crate) fn informatech_permissions_forcees() -> Vec<&'static str> {
     let mut v = INFORMATECH_PERMISSIONS_REFUSEES.to_vec();
     if INFORMATECH_REFUSE_TRANSFERT_FICHIERS {
         v.push(keys::OPTION_ENABLE_FILE_TRANSFER);
+    }
+    if INFORMATECH_SANS_CAPTURE {
+        v.push(keys::OPTION_ENABLE_RECORD_SESSION);
     }
     v
 }
@@ -3218,6 +3222,9 @@ mod tests {
         // A recording never starts, whatever asks; stopping stays possible.
         assert!(!informatech_enregistrement(true));
         assert!(!informatech_enregistrement(false));
+        // The « record the session » permission is refused and forced N like the S-072 kinds.
+        assert!(informatech_permission_refusee(keys::OPTION_ENABLE_RECORD_SESSION));
+        assert!(informatech_permissions_forcees().contains(&keys::OPTION_ENABLE_RECORD_SESSION));
     }
 
     #[test]

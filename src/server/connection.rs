@@ -4075,7 +4075,10 @@ impl Connection {
                     // TODO: Maybe we can do a voice call from cm directly.
                 }
                 Some(message::Union::ScreenshotRequest(request)) => {
-                    if let Some(tx) = self.inner.tx.clone() {
+                    // InformaTech (Styx 16/11, Scylla S-077): the PC never hands a screenshot of its screen out.
+                    if crate::common::INFORMATECH_SANS_CAPTURE {
+                        log::info!("informatech: screenshot request refused");
+                    } else if let Some(tx) = self.inner.tx.clone() {
                         crate::video_service::set_take_screenshot(
                             self.video_source(),
                             request.display as _,

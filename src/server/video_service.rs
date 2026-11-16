@@ -656,10 +656,8 @@ fn run(vs: VideoService) -> ResultType<()> {
     );
     let client_record = video_qos.record();
     drop(video_qos);
-    // InformaTech (Styx 16/11): refused in code, not only by the forced option (S-072 showed options can be
-    // bypassed): neither the PC's own auto-record nor a recording asked by the viewer ever starts here.
-    let record_incoming = crate::common::informatech_enregistrement(record_incoming);
-    let client_record = crate::common::informatech_enregistrement(client_record);
+    // InformaTech (Styx 16/11): the recorder's gate is inside get_recorder (Scylla S-077). `client_record` is left
+    // as the viewer reports it: it only feeds the encoder config, and check_qos compares it with video_qos.record().
     let (mut encoder, encoder_cfg, codec_format, use_i444, recorder) = match setup_encoder(
         &c,
         sp.name(),
@@ -1148,6 +1146,9 @@ fn get_recorder(
     display_idx: usize,
     camera: bool,
 ) -> Arc<Mutex<Option<Recorder>>> {
+    // InformaTech (Styx 16/11, Scylla S-077): refused in code, not only by the forced option: the client PC never
+    // gets a recorder for an incoming session, whatever the option, the toml or a server says.
+    let record_incoming = crate::common::informatech_enregistrement(record_incoming);
     #[cfg(windows)]
     let root = crate::platform::is_root();
     #[cfg(not(windows))]
@@ -1527,5 +1528,17 @@ fn handle_screenshot(screenshot: Screenshot, msg: String, w: usize, h: usize, da
         .send((hbb_common::tokio::time::Instant::now(), Arc::new(msg_out)))
     {
         log::error!("Failed to send screenshot, {}", e);
+    }
+}
+
+#[cfg(test)]
+mod informatech_capture_tests {
+    use super::*;
+
+    /// S-077: the client PC builds no recorder for an incoming session, even when asked to.
+    #[test]
+    fn informatech_host_never_gets_a_recorder() {
+        assert!(get_recorder(true, 0, false).lock().unwrap().is_none());
+        assert!(get_recorder(false, 0, false).lock().unwrap().is_none());
     }
 }
