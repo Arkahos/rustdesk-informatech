@@ -23,6 +23,7 @@ import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
+import '../widgets/informatech_barre.dart';
 import '../widgets/custom_scale_widget.dart';
 
 final initText = '1' * 1024;
@@ -62,6 +63,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Timer? _timer;
   bool _showBar = !isWebDesktop;
   bool _showGestureHelp = false;
+  // InformaTech (OPMD Android, D10): « Terminer » asked, confirmed in place of the bottom bar; session start.
+  bool _itConfirme = false;
+  final _itDebut = DateTime.now();
   String _value = '';
   Orientation? _currentOrientation;
   final _uniqueKey = UniqueKey();
@@ -442,11 +446,68 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     });
   }
 
-  Widget _bottomWidget() => _showGestureHelp
-      ? getGestureHelp()
-      : (_showBar && gFFI.ffiModel.pi.displays.isNotEmpty
-          ? getBottomAppBar()
-          : Offstage());
+  Widget _bottomWidget() => isAndroid
+      ? _itBarreBas()
+      : _showGestureHelp
+          ? getGestureHelp()
+          : (_showBar && gFFI.ffiModel.pi.displays.isNotEmpty
+              ? getBottomAppBar()
+              : Offstage());
+
+  // InformaTech (OPMD Android, D10): Gon's session bars (widgets/informatech_barre.dart).
+  String get _itPoste {
+    final h = gFFI.ffiModel.pi.hostname;
+    return h.isEmpty ? widget.id : h;
+  }
+
+  void _itTerminer() {
+    setState(() => _itConfirme = false);
+    closeConnection();
+  }
+
+  Widget _itBarreBas() {
+    final ffiModel = gFFI.ffiModel;
+    final pi = ffiModel.pi;
+    if (pi.displays.isEmpty && !_itConfirme) return Offstage();
+    return BarreBas(
+      poste: _itPoste,
+      confirme: _itConfirme,
+      tactile: ffiModel.touchMode,
+      clavierPermis: ffiModel.keyboard && !ffiModel.viewOnly,
+      ecrans: pi.displays.length,
+      ecranCourant: pi.currentDisplay == kAllDisplayValue ? -1 : pi.currentDisplay,
+      onMode: () {
+        ffiModel.toggleTouchMode();
+        bind.mainSetLocalOption(key: kOptionTouchMode, value: ffiModel.touchMode ? 'Y' : 'N');
+        setState(() {});
+      },
+      onClavier: openKeyboard,
+      onEcran: () async {
+        final i = await choisirEcran(context,
+            ecrans: pi.displays.length,
+            courant: pi.currentDisplay == kAllDisplayValue ? -1 : pi.currentDisplay,
+            tousPermis: pi.isSupportMultiDisplay);
+        if (i == null) return;
+        openMonitorInTheSameTab(i < 0 ? kAllDisplayValue : i, gFFI, pi);
+      },
+      onCtrlAltSuppr: () => bind.sessionCtrlAltDel(sessionId: sessionId),
+      onDiscussion: () => onPressedTextChat(widget.id),
+      onAnnuler: () => setState(() => _itConfirme = false),
+      onTerminer: _itTerminer,
+    );
+  }
+
+  PreferredSizeWidget _itBarreHaut() => PreferredSize(
+        preferredSize: const Size.fromHeight(52),
+        child: Obx(() => BarreHaut(
+              poste: _itPoste,
+              etat: gFFI.ffiModel.pi.isSet.isTrue && gFFI.ffiModel.waitForFirstImage.isFalse
+                  ? EtatLien.connecte
+                  : EtatLien.connexion,
+              debut: _itDebut,
+              onTerminer: () => setState(() => _itConfirme = true),
+            )),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -456,15 +517,20 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
     return WillPopScope(
       onWillPop: () async {
-        clientClose(sessionId, gFFI);
+        if (isAndroid) {
+          setState(() => _itConfirme = true);
+        } else {
+          clientClose(sessionId, gFFI);
+        }
         return false;
       },
       child: Scaffold(
+          appBar: isAndroid ? _itBarreHaut() : null,
           // workaround for https://github.com/rustdesk/rustdesk/issues/3131
           floatingActionButtonLocation: keyboardIsVisible
               ? FABLocation(FloatingActionButtonLocation.endFloat, 0, -35)
               : null,
-          floatingActionButton: !showActionButton
+          floatingActionButton: !showActionButton || (isAndroid && !keyboardIsVisible)
               ? null
               : FloatingActionButton(
                   mini: !keyboardIsVisible,

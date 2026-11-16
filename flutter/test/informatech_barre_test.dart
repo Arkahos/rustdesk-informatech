@@ -1,0 +1,54 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_hbb/mobile/widgets/informatech_barre.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+Widget _barre({required bool confirme, int ecrans = 1, bool clavier = true, VoidCallback? onTerminer, VoidCallback? onAnnuler}) =>
+    MaterialApp(
+      home: Scaffold(
+        bottomNavigationBar: BarreBas(
+          poste: 'PC-SALON',
+          confirme: confirme,
+          tactile: false,
+          clavierPermis: clavier,
+          ecrans: ecrans,
+          ecranCourant: 0,
+          onMode: () {},
+          onClavier: () {},
+          onEcran: () {},
+          onCtrlAltSuppr: () {},
+          onDiscussion: () {},
+          onAnnuler: onAnnuler ?? () {},
+          onTerminer: onTerminer ?? () {},
+        ),
+      ),
+    );
+
+void main() {
+  test('duration reads mm:ss, then h:mm:ss', () {
+    expect(dureeSession(const Duration(minutes: 12, seconds: 4)), '12:04');
+    expect(dureeSession(const Duration(hours: 1, minutes: 2, seconds: 4)), '1:02:04');
+    expect(dureeSession(const Duration(seconds: -3)), '00:00');
+  });
+
+  testWidgets('D10 tools: mouse, keyboard, Ctrl Alt Suppr, chat; no file transfer, no screen button with one screen', (t) async {
+    await t.pumpWidget(_barre(confirme: false));
+    for (final l in ['Souris', 'Clavier', 'Ctrl Alt Suppr', 'Discussion']) {
+      expect(find.text(l), findsOneWidget);
+    }
+    expect(find.textContaining('Écran'), findsNothing);
+    expect(find.textContaining('ichier'), findsNothing);
+    await t.pumpWidget(_barre(confirme: false, ecrans: 2));
+    expect(find.text('Écran 1'), findsOneWidget);
+  });
+
+  testWidgets('« Terminer » is confirmed in place: Annuler or Terminer, with the PC name', (t) async {
+    var fin = 0, annule = 0;
+    await t.pumpWidget(_barre(confirme: true, onTerminer: () => fin++, onAnnuler: () => annule++));
+    expect(find.text('Terminer la session avec PC-SALON ?'), findsOneWidget);
+    expect(find.text('Souris'), findsNothing);
+    await t.tap(find.text('Annuler'));
+    expect((annule, fin), (1, 0));
+    await t.tap(find.text('Terminer'));
+    expect(fin, 1);
+  });
+}
