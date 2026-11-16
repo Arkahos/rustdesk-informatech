@@ -3286,7 +3286,8 @@ impl LoginConfigHandler {
             .into();
         } else if name == "enable-file-copy-paste" {
             config.enable_file_copy_paste.v = !config.enable_file_copy_paste.v;
-            option.enable_file_transfer = (if config.enable_file_copy_paste.v {
+            // InformaTech (OPMD Android viewer, D10): never asks the PC for file copy/paste.
+            option.enable_file_transfer = (if config.enable_file_copy_paste.v && !cfg!(target_os = "android") {
                 BoolOption::Yes
             } else {
                 BoolOption::No
@@ -3319,7 +3320,8 @@ impl LoginConfigHandler {
                 option.disable_keyboard = f(false);
                 option.disable_clipboard = f(self.get_toggle_option("disable-clipboard"));
                 option.show_remote_cursor = f(self.get_toggle_option("show-remote-cursor"));
-                option.enable_file_transfer = f(self.config.enable_file_copy_paste.v);
+                option.enable_file_transfer =
+                    f(self.config.enable_file_copy_paste.v && !cfg!(target_os = "android"));
                 option.lock_after_session_end = f(self.config.lock_after_session_end.v);
                 if config.show_my_cursor.v {
                     config.show_my_cursor.v = false;
@@ -3441,7 +3443,11 @@ impl LoginConfigHandler {
         if self.get_toggle_option("disable-audio") {
             msg.disable_audio = BoolOption::Yes.into();
         }
-        if !view_only && self.get_toggle_option(keys::OPTION_ENABLE_FILE_COPY_PASTE) {
+        // InformaTech (OPMD Android viewer, D10): never asks the PC for file copy/paste.
+        if !view_only
+            && !cfg!(target_os = "android")
+            && self.get_toggle_option(keys::OPTION_ENABLE_FILE_COPY_PASTE)
+        {
             msg.enable_file_transfer = BoolOption::Yes.into();
         }
         if view_only || self.get_toggle_option("disable-clipboard") {

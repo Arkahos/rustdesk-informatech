@@ -190,6 +190,17 @@ impl<T: InvokeUiSession> Remote<T> {
         } else {
             ConnType::default()
         };
+        // InformaTech (OPMD Android viewer, D10): no connection other than a screen session ever leaves the phone.
+        #[cfg(target_os = "android")]
+        if !crate::common::informatech_viewer_accepte(conn_type) {
+            self.handler.msgbox(
+                "error",
+                "Transfert de fichiers",
+                crate::common::INFORMATECH_VIEWER_REFUS,
+                "",
+            );
+            return;
+        }
 
         match Client::start(
             &self.handler.get_id(),

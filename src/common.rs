@@ -2400,6 +2400,17 @@ pub const INFORMATECH_PUBLISHER: &str = "InformaTech";
 pub const INFORMATECH_SERVICE_DESCRIPTION: &str =
     "Permet à InformaTech de vous aider à distance, avec votre accord. Retirez l'accès depuis InformaTech Hub › Assistance.";
 
+/// InformaTech (OPMD Android viewer, D10): the phone opens screen sessions only (view + control). File transfer, and
+/// the other non-screen kinds (terminal, port forward, RDP, camera), are refused by the engine whatever the Dart side
+/// asks (Scylla's V1 row « Rust-side file-transfer refusal in the viewer »).
+pub(crate) fn informatech_viewer_accepte(conn_type: hbb_common::rendezvous_proto::ConnType) -> bool {
+    conn_type == hbb_common::rendezvous_proto::ConnType::DEFAULT_CONN
+}
+
+/// InformaTech (OPMD Android viewer, D10): the sentence shown when a refused kind is asked for.
+pub(crate) const INFORMATECH_VIEWER_REFUS: &str =
+    "Le transfert de fichiers n’est pas disponible dans InformaTech Assistance.";
+
 pub(crate) fn apply_informatech_defaults() {
     // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
     // ce qui évite de modifier (et donc de forker) le sous-module hbb_common.
@@ -3041,6 +3052,21 @@ mod tests {
         time::{interval, interval_at, sleep, Duration, Instant, Interval},
     };
     use std::collections::HashSet;
+
+    #[test]
+    fn informatech_viewer_screen_sessions_only() {
+        use hbb_common::rendezvous_proto::ConnType;
+        assert!(informatech_viewer_accepte(ConnType::DEFAULT_CONN));
+        for refuse in [
+            ConnType::FILE_TRANSFER,
+            ConnType::PORT_FORWARD,
+            ConnType::RDP,
+            ConnType::VIEW_CAMERA,
+            ConnType::TERMINAL,
+        ] {
+            assert!(!informatech_viewer_accepte(refuse), "{refuse:?}");
+        }
+    }
 
     #[test]
     fn a_cursor_content_id_fits_a_web_client_number() {
