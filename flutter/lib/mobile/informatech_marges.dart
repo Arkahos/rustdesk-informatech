@@ -11,8 +11,9 @@ class InformatechMarges {
   static const rail = 72.0;
   static const railTablette = 88.0;
 
-  /// Material « expanded » width: tablet layout from here (Gon, tablette.html).
-  static const largeurTablette = 840.0;
+  /// A tablet is told by its SHORT side (Android's sw600dp), not by its width: a phone in landscape is wider than
+  /// Material's 840 dp « expanded » breakpoint (S24+: about 914 x 412 dp) and must keep the phone rail.
+  static const petitCoteTablette = 600.0;
 
   /// The bars for a screen of [largeur] x [hauteur]: tools at the bottom in portrait, in a right rail in landscape.
   /// Returns true when something changed (the canvas must then be fitted again).
@@ -20,7 +21,8 @@ class InformatechMarges {
     final paysage = largeur > hauteur;
     const h = barreHaut;
     final b = paysage ? 0.0 : barreBas;
-    final d = paysage ? (largeur >= largeurTablette ? railTablette : rail) : 0.0;
+    final petitCote = largeur < hauteur ? largeur : hauteur;
+    final d = paysage ? (petitCote >= petitCoteTablette ? railTablette : rail) : 0.0;
     final change = h != haut || b != bas || d != droite;
     haut = h;
     bas = b;
