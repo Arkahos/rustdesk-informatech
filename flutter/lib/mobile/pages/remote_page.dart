@@ -497,18 +497,17 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     );
   }
 
-  PreferredSizeWidget _itBarreHaut() => PreferredSize(
-        preferredSize: const Size.fromHeight(52),
-        child: Obx(() => BarreHaut(
-              poste: _itPoste,
-              etat: () => gFFI.ffiModel.informatechPerte
-                  ? EtatLien.perdu
-                  : gFFI.ffiModel.pi.isSet.isTrue && gFFI.ffiModel.waitForFirstImage.isFalse
-                      ? EtatLien.connecte
-                      : EtatLien.connexion,
-              debut: _itDebut,
-              onTerminer: () => setState(() => _itConfirme = true),
-            )),
+  // No Obx here (Argos 16/11): the bar reads its PC name and state itself at every one-second tick, and an Obx whose
+  // builder reads no observable makes GetX throw (« improper use of a GetX »), which left an error box as the top bar.
+  PreferredSizeWidget _itBarreHaut() => BarreHaut(
+        poste: () => _itPoste,
+        etat: () => gFFI.ffiModel.informatechPerte
+            ? EtatLien.perdu
+            : gFFI.ffiModel.pi.isSet.isTrue && gFFI.ffiModel.waitForFirstImage.isFalse
+                ? EtatLien.connecte
+                : EtatLien.connexion,
+        debut: _itDebut,
+        onTerminer: () => setState(() => _itConfirme = true),
       );
 
   @override

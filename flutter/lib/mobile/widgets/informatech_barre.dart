@@ -51,9 +51,10 @@ Widget _icone(String nom, Color couleur, [double taille = 20]) => SvgPicture.ass
 
 class BarreHaut extends StatefulWidget implements PreferredSizeWidget {
   const BarreHaut({super.key, required this.poste, this.client, required this.etat, required this.debut, required this.onTerminer});
-  final String poste;
+  /// Both read at every tick (once a second): the PC name arrives after the bar is up, and an outage must show
+  /// without a rebuild from the page. Plain callbacks, no Obx around the bar.
+  final String Function() poste;
   final String? client;
-  /// Read at every tick (once a second), so an outage shows without a rebuild from the page.
   final EtatLien Function() etat;
   final DateTime debut;
   final VoidCallback onTerminer;
@@ -96,7 +97,7 @@ class _BarreHautState extends State<BarreHaut> {
             const SizedBox(width: 10),
             Expanded(
               child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.poste,
+                Text(widget.poste(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontFamily: Charte.police, fontWeight: FontWeight.w600, fontSize: 15, color: Charte.texte)),

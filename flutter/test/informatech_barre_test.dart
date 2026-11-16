@@ -26,15 +26,23 @@ Widget _barre({required bool confirme, int ecrans = 1, bool clavier = true, Void
 void main() {
   testWidgets('the state dot follows the link: mint connected, amber connecting, coral lost', (t) async {
     var etat = EtatLien.connecte;
+    var poste = '';
     await t.pumpWidget(MaterialApp(
-        home: Scaffold(appBar: BarreHaut(poste: 'PC-SALON', etat: () => etat, debut: DateTime.now(), onTerminer: () {}))));
+        home: Scaffold(appBar: BarreHaut(poste: () => poste, etat: () => etat, debut: DateTime.now(), onTerminer: () {}))));
+    // The page wires the bar exactly like this, as the scaffold's appBar and with no Obx: nothing may throw.
+    expect(t.takeException(), isNull);
     Color point() => ((t.widgetList<Container>(find.byType(Container)).firstWhere((c) => c.constraints?.maxWidth == 8).decoration) as BoxDecoration).color!;
     expect(point(), couleurEtat(EtatLien.connecte));
     etat = EtatLien.perdu;
     await t.pump(const Duration(seconds: 1));
     expect(point(), couleurEtat(EtatLien.perdu));
+    // The PC name arrives after the bar is built: it shows at the next tick.
+    expect(find.text('PC-SALON'), findsNothing);
+    poste = 'PC-SALON';
+    await t.pump(const Duration(seconds: 1));
     expect(find.text('PC-SALON'), findsOneWidget);
     expect(find.text('Terminer'), findsOneWidget);
+    expect(t.takeException(), isNull);
   });
 
   test('duration reads mm:ss, then h:mm:ss', () {
