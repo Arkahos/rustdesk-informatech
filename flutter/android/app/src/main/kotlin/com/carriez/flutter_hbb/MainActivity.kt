@@ -227,6 +227,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // InformaTech (Styx 16/11, Luffy): the session view shows the client's screen. FLAG_SECURE on the whole
+        // window: no recent-apps thumbnail, no OS screenshot, no screen recording or casting of it.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)

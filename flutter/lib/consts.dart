@@ -101,6 +101,8 @@ const String kOptionDirectAccessPort = "direct-access-port";
 const String kOptionAllowAutoDisconnect = "allow-auto-disconnect";
 const String kOptionAutoDisconnectTimeout = "auto-disconnect-timeout";
 const String kOptionEnableHwcodec = "enable-hwcodec";
+/// InformaTech (Styx 16/11): no recording and no screenshot of a session; mirrors INFORMATECH_SANS_CAPTURE (Rust).
+const bool kInformatechSansCapture = true;
 const String kOptionAllowAutoRecordIncoming = "allow-auto-record-incoming";
 const String kOptionAllowAutoRecordOutgoing = "allow-auto-record-outgoing";
 const String kOptionHideRecordingButton = "hide-recording-button";

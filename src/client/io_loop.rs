@@ -742,6 +742,10 @@ impl<T: InvokeUiSession> Remote<T> {
         if crate::common::INFORMATECH_VIEWER && crate::common::informatech_viewer_ignore(&data) {
             return true;
         }
+        // InformaTech (Styx 16/11): no recording, no screenshot of the client's screen, on any platform.
+        if crate::common::informatech_capture_ignoree(&data) {
+            return true;
+        }
         match data {
             Data::Close => {
                 self.send_close_reason(peer, "").await;

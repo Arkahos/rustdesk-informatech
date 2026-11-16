@@ -849,7 +849,8 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }
-    if (!isWeb) toolbarItems.add(_RecordMenu());
+    // InformaTech (Styx 16/11): a session is never recorded; the engine refuses it too (INFORMATECH_SANS_CAPTURE).
+    if (!isWeb && !kInformatechSansCapture) toolbarItems.add(_RecordMenu());
     toolbarItems.add(_CloseMenu(id: widget.id, ffi: widget.ffi));
     final toolbarBorderRadius = BorderRadius.all(Radius.circular(4.0));
     // innerAxis: how the toolbar icons themselves flow.

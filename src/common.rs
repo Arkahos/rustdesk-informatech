@@ -2420,6 +2420,24 @@ pub(crate) const INFORMATECH_VIEWER_REFUS_TITRE: &str = "Non disponible";
 pub(crate) const INFORMATECH_VIEWER_REFUS: &str =
     "InformaTech Assistance n’ouvre que l’écran du poste : ce type de connexion n’est pas disponible.";
 
+/// InformaTech (Styx 16/11, Leia note 2cad73e): a session's content is never recorded. The published policy says « Le
+/// contenu d’une session (écran, clavier) […] n’est jamais enregistré », so no build of this engine (Windows viewer on
+/// Adrien's PC, Android viewer, client PC) records a session or saves a screenshot of the client's screen. A compiled
+/// switch: captures would first need consent text, a storage place and a retention rule (a product decision).
+pub(crate) const INFORMATECH_SANS_CAPTURE: bool = true;
+
+/// UI orders dropped because of `INFORMATECH_SANS_CAPTURE`: start a recording, take a screenshot.
+pub(crate) fn informatech_capture_ignoree(data: &crate::client::Data) -> bool {
+    use crate::client::Data;
+    INFORMATECH_SANS_CAPTURE && matches!(data, Data::RecordScreen(_) | Data::TakeScreenshot(_))
+}
+
+/// Whether a recording may start (`demande` = what was asked: the manual order or the auto-record option). Stopping
+/// is always allowed.
+pub(crate) fn informatech_enregistrement(demande: bool) -> bool {
+    demande && !INFORMATECH_SANS_CAPTURE
+}
+
 /// InformaTech (OPMD Android viewer, D10): UI messages the viewer's session loop drops: every file operation
 /// (send, receive, resume, delete, create, rename). Belt to `informatech_viewer_accepte` (Argos P4).
 pub(crate) fn informatech_viewer_ignore(data: &crate::client::Data) -> bool {
@@ -2503,6 +2521,15 @@ pub(crate) fn apply_informatech_defaults() {
     // OPMD 0.1.1: no remote audio (echo on a client's Discord call). S-072: no tunnel / RDP, terminal or camera.
     for option in informatech_permissions_forcees() {
         forces.insert(option.to_owned(), "N".to_owned());
+    }
+    // Never recorded (Styx 16/11): no automatic recording of incoming sessions (client PC) or outgoing ones (viewer).
+    if INFORMATECH_SANS_CAPTURE {
+        forces.insert(keys::OPTION_ALLOW_AUTO_RECORD_INCOMING.to_owned(), "N".to_owned());
+        drop(forces);
+        config::OVERWRITE_LOCAL_SETTINGS
+            .write()
+            .unwrap()
+            .insert(keys::OPTION_ALLOW_AUTO_RECORD_OUTGOING.to_owned(), "N".to_owned());
     }
 }
 
@@ -3179,6 +3206,18 @@ mod tests {
         // What the product uses is left to the client's switch.
         assert!(informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, true));
         assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, false));
+    }
+
+    #[test]
+    fn informatech_never_records_a_session() {
+        use crate::client::Data;
+        assert!(INFORMATECH_SANS_CAPTURE);
+        assert!(informatech_capture_ignoree(&Data::RecordScreen(true)));
+        assert!(informatech_capture_ignoree(&Data::TakeScreenshot((0, String::new()))));
+        assert!(!informatech_capture_ignoree(&Data::Close));
+        // A recording never starts, whatever asks; stopping stays possible.
+        assert!(!informatech_enregistrement(true));
+        assert!(!informatech_enregistrement(false));
     }
 
     #[test]

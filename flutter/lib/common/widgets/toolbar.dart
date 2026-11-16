@@ -604,7 +604,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   if ((isDefaultConn || ffi.connType == ConnType.viewCamera) && isDesktop) {
     final isScreenshotSupported = bind.sessionGetCommonSync(
         sessionId: sessionId, key: 'is_screenshot_supported', param: '');
-    if ('true' == isScreenshotSupported) {
+    if ('true' == isScreenshotSupported && !kInformatechSansCapture) {
       v.add(TTextMenu(
         child: Text(ffi.ffiModel.timerScreenshot != null
             ? '${translate('Taking screenshot')} ...'
