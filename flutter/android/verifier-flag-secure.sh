@@ -25,4 +25,12 @@ n=$(grep -n "^        if (!InformatechFenetre.$c) {\$" "$m" | cut -d: -f1)
 # clearFlags(FLAG_ALT_FOCUSABLE_IM); any other one (a FLAG_SECURE one, or a computed flag) fails the build.
 autres=$(grep -rnE "clearFlags|setFlags\(" . | grep -vF "window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)" || true)
 [ -z "$autres" ] || echec "unexpected clearFlags / setFlags: $autres"
-echo "FLAG_SECURE: release and profile always, waived in debug only"
+# Nor through the window attributes (Scylla 16/11: `window.attributes = … flags and FLAG_SECURE.inv()` got past the
+# rule above). Two rules: (1) in the two activities that own a window, no write to `.flags` or `attributes` and no
+# `.inv()`; (2) in the whole app, the token FLAG_SECURE appears only on an addFlags line or in a comment.
+activites="main/kotlin/com/carriez/flutter_hbb/MainActivity.kt main/kotlin/com/carriez/flutter_hbb/ConnexionActivity.kt"
+attributs=$(grep -nE "flags[[:space:]]*(=|[|&^]=)|attributes[[:space:]]*=|\.inv\(\)" $activites || true)
+[ -z "$attributs" ] || echec "window flags written another way: $attributs"
+ailleurs=$(grep -rn "FLAG_SECURE" --include=*.kt --include=*.java . | grep -vE ":[0-9]+:[[:space:]]*(//|\*)" | grep -vE "window\.addFlags\((android\.view\.)?WindowManager\.LayoutParams\.FLAG_SECURE\)$" || true)
+[ -z "$ailleurs" ] || echec "FLAG_SECURE used outside an addFlags line: $ailleurs"
+echo "FLAG_SECURE: release and profile always, waived in debug only (checked by $(command -v bash), $(uname -sr))"
