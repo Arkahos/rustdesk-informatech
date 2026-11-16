@@ -8,6 +8,7 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
+import 'informatech_attente_page.dart';
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -47,6 +48,12 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
+    // InformaTech (A1): the Android viewer only waits for a session from InformaTech Admin. No ID field, address book,
+    // « share screen » (be controlled) or settings page.
+    if (isAndroid) {
+      _pages.add(InformaTechAttentePage());
+      return;
+    }
     if (!bind.isIncomingOnly()) {
       _pages.add(ConnectionPage(
         appBarActions: [],
@@ -79,7 +86,7 @@ class HomePageState extends State<HomePage> {
             title: appTitle(),
             actions: _pages.elementAt(_selectedIndex).appBarActions,
           ),
-          bottomNavigationBar: BottomNavigationBar(
+          bottomNavigationBar: _pages.length < 2 ? null : BottomNavigationBar(
             key: navigationBarKey,
             items: _pages
                 .map((page) =>

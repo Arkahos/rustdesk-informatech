@@ -1009,6 +1009,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onStart() {
         super.onStart()
-        stopService(Intent(this, FloatingWindowService::class.java))
+        // InformaTech (A1): the viewer declares no FloatingWindowService (be-controlled side removed).
+        if (MainService.isReady) stopService(Intent(this, FloatingWindowService::class.java))
     }
 }
