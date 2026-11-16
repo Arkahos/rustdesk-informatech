@@ -145,7 +145,7 @@ class _Outil extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final couleur = onTap == null ? Charte.texte3 : (actif ? Charte.accent : Charte.texte);
-    return Expanded(
+    return SizedBox(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
         child: Material(
@@ -187,7 +187,11 @@ class BarreBas extends StatelessWidget {
     required this.onDiscussion,
     required this.onAnnuler,
     required this.onTerminer,
+    this.rail = 0,
   });
+
+  /// 0 = bottom bar (portrait); else the width of the right rail (landscape, tablet).
+  final double rail;
   final String poste;
   final bool confirme;
   final bool tactile;
@@ -199,21 +203,35 @@ class BarreBas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (rail > 0 && !confirme) {
+      return Material(
+        color: Charte.fond,
+        child: Container(
+          width: rail,
+          decoration: const BoxDecoration(border: Border(left: BorderSide(color: Charte.trait))),
+          child: SingleChildScrollView(
+            child: Column(children: [for (final o in _outils()) SizedBox(width: rail, height: 60, child: o)]),
+          ),
+        ),
+      );
+    }
     return Material(
       color: Charte.fond,
       child: SafeArea(
         top: false,
         child: Container(
           decoration: BoxDecoration(border: Border(top: BorderSide(color: confirme ? Charte.erreur : Charte.trait))),
-          child: confirme ? _confirmation() : SizedBox(height: 64, child: _outils()),
+          child: confirme
+              ? _confirmation()
+              : SizedBox(height: 64, child: Row(children: [for (final o in _outils()) Expanded(child: o)])),
         ),
       ),
     );
   }
 
-  Widget _outils() {
+  List<Widget> _outils() {
     final c = clavierPermis ? Charte.texte : Charte.texte3;
-    return Row(children: [
+    return [
       _Outil(
           icone: _icone(tactile ? 'hand' : 'mouse-pointer-2', Charte.accent),
           libelle: tactile ? TextesBarre.tactile : TextesBarre.souris,
@@ -236,7 +254,7 @@ class BarreBas extends StatelessWidget {
           petit: true,
           onTap: clavierPermis ? onCtrlAltSuppr : null),
       _Outil(icone: _icone('message-square', Charte.texte), libelle: TextesBarre.discussion, onTap: onDiscussion),
-    ]);
+    ];
   }
 
   Widget _confirmation() {

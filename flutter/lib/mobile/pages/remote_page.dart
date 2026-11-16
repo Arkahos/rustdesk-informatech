@@ -23,6 +23,7 @@ import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
+import '../informatech_marges.dart';
 import '../widgets/informatech_barre.dart';
 import '../widgets/custom_scale_widget.dart';
 
@@ -184,6 +185,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     gFFI.chatModel.onVoiceCallClosed("End connection");
     if (isAndroid) {
       platformFFI.invokeMethod('informatech_session', false);
+      InformatechMarges.retirer();
       // InformaTech (A1, Argos P3): no peer file survives the session. Again a little later: the session may still
       // write its config while it closes.
       bind.mainInformatechEffacerTraces();
@@ -465,11 +467,15 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     closeConnection();
   }
 
-  Widget _itBarreBas() {
+  /// Bottom of the scaffold: the tools in portrait, only the « Terminer » confirmation in landscape (tools = rail).
+  Widget _itBarreBas({bool rail = false}) {
     final ffiModel = gFFI.ffiModel;
     final pi = ffiModel.pi;
     if (pi.displays.isEmpty && !_itConfirme) return Offstage();
+    if (!rail && InformatechMarges.droite > 0 && !_itConfirme) return Offstage();
+    if (rail && _itConfirme) return Offstage();
     return BarreBas(
+      rail: rail ? InformatechMarges.droite : 0,
       poste: _itPoste,
       confirme: _itConfirme,
       tactile: ffiModel.touchMode,
@@ -515,6 +521,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     final keyboardIsVisible =
         keyboardVisibilityController.isVisible && _showEdit;
     final showActionButton = !_showBar || keyboardIsVisible || _showGestureHelp;
+    // InformaTech (OPMD Android, D10): the bars take their room; the image is fitted to the rest.
+    if (isAndroid) {
+      final ecran = MediaQuery.of(context).size;
+      if (InformatechMarges.poser(ecran.width, ecran.height)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => gFFI.canvasModel.updateViewStyle());
+      }
+    }
 
     return WillPopScope(
       onWillPop: () async {
@@ -591,7 +604,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                   gFFI.canvasModel.updateViewStyle();
                                 });
                               }
-                              return Container(
+                              final image = Container(
                                 color: MyTheme.canvasColor,
                                 child: inputModel.isPhysicalMouse.value
                                     ? getBodyForMobile()
@@ -600,6 +613,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                                         ffi: gFFI,
                                       ),
                               );
+                              // InformaTech (D10): landscape and tablet, the tools sit in a rail right of the image.
+                              if (isAndroid && InformatechMarges.droite > 0) {
+                                return Row(children: [
+                                  Expanded(child: image),
+                                  _itBarreBas(rail: true),
+                                ]);
+                              }
+                              return image;
                             }),
                           ),
                   );
