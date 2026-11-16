@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- InformaTech (A11, D17): SessionService keeps an open session alive (screen off, background, network switch). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- InformaTech (A1): only an app signed with the same certificate (« InformaTech Admin ») may start a session. -->
     <permission
@@ -62,6 +65,15 @@
             android:exported="false"
             android:noHistory="true"
             android:theme="@style/Transparent" />
+        <service
+            android:name=".SessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Remote desktop session in progress (InformaTech technician)" />
+        </service>
+
         <activity-alias
             android:name="fr.informatech.assistance.ConnexionActivity"
             android:exported="true"

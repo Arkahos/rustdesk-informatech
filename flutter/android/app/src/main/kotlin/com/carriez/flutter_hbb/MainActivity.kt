@@ -270,6 +270,11 @@ class MainActivity : FlutterActivity() {
                 "informatech_connexion" -> {
                     result.success(ConnexionEnAttente.prendre())
                 }
+                // InformaTech (A11, D17): foreground service while a remote page is open.
+                "informatech_session" -> {
+                    if (call.arguments == true) SessionService.demarrer(this) else SessionService.arreter(this)
+                    result.success(null)
+                }
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)

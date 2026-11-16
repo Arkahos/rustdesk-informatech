@@ -93,6 +93,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // InformaTech (A11, D17): a foreground service keeps the session alive while this page is open.
+    if (isAndroid) platformFFI.invokeMethod('informatech_session', true);
     gFFI.ffiModel.updateEventListener(sessionId, widget.id);
     gFFI.start(
       widget.id,
@@ -176,6 +178,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     // The inner logic of `on_voice_call_closed` will check if the voice call is active.
     // Only one client is considered here for now.
     gFFI.chatModel.onVoiceCallClosed("End connection");
+    if (isAndroid) platformFFI.invokeMethod('informatech_session', false);
   }
 
   @override
