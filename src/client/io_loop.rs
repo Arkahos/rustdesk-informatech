@@ -193,8 +193,11 @@ impl<T: InvokeUiSession> Remote<T> {
         // InformaTech (OPMD Android viewer, D10): no connection other than a screen session ever leaves the phone.
         // The gate reads the session's own type (lc.conn_type): the local `conn_type` above never says port forward or
         // RDP, which would then pass as a screen session (Argos P2).
-        #[cfg(target_os = "android")]
-        if !crate::common::informatech_viewer_accepte(self.handler.lc.read().unwrap().conn_type) {
+        // Second lock, after flutter::session_add (Scylla 16/11).
+        if !crate::common::informatech_viewer_accepte(
+            crate::common::INFORMATECH_VIEWER,
+            self.handler.lc.read().unwrap().conn_type,
+        ) {
             self.handler.msgbox(
                 "error",
                 crate::common::INFORMATECH_VIEWER_REFUS_TITRE,
@@ -736,8 +739,7 @@ impl<T: InvokeUiSession> Remote<T> {
 
     async fn handle_msg_from_ui(&mut self, data: Data, peer: &mut Stream) -> bool {
         // InformaTech (OPMD Android viewer, D10): no file operation leaves the phone, whatever the Dart side sends.
-        #[cfg(target_os = "android")]
-        if crate::common::informatech_viewer_ignore(&data) {
+        if crate::common::INFORMATECH_VIEWER && crate::common::informatech_viewer_ignore(&data) {
             return true;
         }
         match data {

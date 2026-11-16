@@ -1258,6 +1258,10 @@ pub fn session_add_existed(
     } else {
         ConnType::DEFAULT_CONN
     };
+    // InformaTech (OPMD Android viewer, D10): same lock as session_add.
+    if !crate::common::informatech_viewer_accepte(crate::common::INFORMATECH_VIEWER, conn_type) {
+        bail!("InformaTech Assistance: screen sessions only");
+    }
     sessions::insert_peer_session_id(peer_id, conn_type, session_id, displays);
     Ok(())
 }
@@ -1299,6 +1303,11 @@ pub fn session_add(
     } else {
         ConnType::DEFAULT_CONN
     };
+    // InformaTech (OPMD Android viewer, D10): first lock. A file-transfer, camera, terminal, port-forward or RDP
+    // session is never created on the phone, whatever flags the Dart side passes (Argos P2, Scylla 16/11).
+    if !crate::common::informatech_viewer_accepte(crate::common::INFORMATECH_VIEWER, conn_type) {
+        bail!("InformaTech Assistance: screen sessions only");
+    }
 
     // to-do: check the same id session.
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {

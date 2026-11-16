@@ -2403,9 +2403,16 @@ pub const INFORMATECH_SERVICE_DESCRIPTION: &str =
 /// InformaTech (OPMD Android viewer, D10): the phone opens screen sessions only (view + control). File transfer, and
 /// the other non-screen kinds (terminal, port forward, RDP, camera), are refused by the engine whatever the Dart side
 /// asks (Scylla's V1 row « Rust-side file-transfer refusal in the viewer »).
-pub(crate) fn informatech_viewer_accepte(conn_type: hbb_common::rendezvous_proto::ConnType) -> bool {
-    conn_type == hbb_common::rendezvous_proto::ConnType::DEFAULT_CONN
+///
+/// Pure decision, the platform is a parameter so the host's unit tests cover the Android answer (Scylla 16/11). Two
+/// locks call it with `INFORMATECH_VIEWER` and the session's own `lc.conn_type` (the field `create_login_msg` reads):
+/// `flutter::session_add` (the session is never created) and `Remote::io_loop` (nothing is sent to the PC).
+pub(crate) fn informatech_viewer_accepte(viewer: bool, conn_type: hbb_common::rendezvous_proto::ConnType) -> bool {
+    !viewer || conn_type == hbb_common::rendezvous_proto::ConnType::DEFAULT_CONN
 }
+
+/// InformaTech: this build is the Android viewer « InformaTech Assistance ».
+pub(crate) const INFORMATECH_VIEWER: bool = cfg!(target_os = "android");
 
 /// InformaTech (OPMD Android viewer, D10): what is shown when a refused kind is asked for (file transfer, camera,
 /// terminal, port forward, RDP alike).
@@ -3075,16 +3082,23 @@ mod tests {
     #[test]
     fn informatech_viewer_screen_sessions_only() {
         use hbb_common::rendezvous_proto::ConnType;
-        assert!(informatech_viewer_accepte(ConnType::DEFAULT_CONN));
-        for refuse in [
+        // The six kinds, as `lc.conn_type` holds them at both call sites.
+        let tous = [
+            ConnType::DEFAULT_CONN,
             ConnType::FILE_TRANSFER,
             ConnType::PORT_FORWARD,
             ConnType::RDP,
             ConnType::VIEW_CAMERA,
             ConnType::TERMINAL,
-        ] {
-            assert!(!informatech_viewer_accepte(refuse), "{refuse:?}");
+        ];
+        for t in tous {
+            // The Android viewer: the screen session only.
+            assert_eq!(informatech_viewer_accepte(true, t), t == ConnType::DEFAULT_CONN, "viewer {t:?}");
+            // The PC engine (Windows): unchanged, every kind goes through.
+            assert!(informatech_viewer_accepte(false, t), "pc {t:?}");
         }
+        // This test runs on the host, which is never the viewer.
+        assert!(!INFORMATECH_VIEWER);
     }
 
     #[test]
