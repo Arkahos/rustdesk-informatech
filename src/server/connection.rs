@@ -823,6 +823,8 @@ impl Connection {
                                         conn.inner.clone(), conn.can_sub_clipboard_service());
                                 }
                             } else if &name == "audio" {
+                                // InformaTech (S-072): the --cm switch cannot turn a refused kind back on.
+                                let enabled = crate::common::informatech_bascule_cm(keys::OPTION_ENABLE_AUDIO, enabled);
                                 conn.audio = enabled;
                                 conn.send_permission(Permission::Audio, enabled).await;
                                 if conn.authorized {
@@ -841,6 +843,9 @@ impl Connection {
                                     }
                                 }
                             } else if &name == "file" {
+                                // InformaTech (S-072): same, once INFORMATECH_REFUSE_TRANSFERT_FICHIERS is true.
+                                let enabled =
+                                    crate::common::informatech_bascule_cm(keys::OPTION_ENABLE_FILE_TRANSFER, enabled);
                                 conn.file = enabled;
                                 conn.send_permission(Permission::File, enabled).await;
                                 #[cfg(feature = "unix-file-copy-paste")]
@@ -7154,10 +7159,40 @@ mod test {
         UNAUTHORIZED_CONNS.lock().unwrap().len()
     }
 
+    /// Tests that edit the process-wide OVERWRITE_SETTINGS hold this (Scylla 16/11): the harness runs tests in
+    /// parallel threads; a poisoned lock is still a lock.
+    static OVERWRITE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets options in OVERWRITE_SETTINGS and puts the previous values back when dropped, panic included.
+    struct OptionsForcees(Vec<(String, Option<String>)>);
+    impl OptionsForcees {
+        fn poser(valeurs: &[(&str, &str)]) -> Self {
+            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
+            Self(
+                valeurs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), o.insert(k.to_string(), v.to_string())))
+                    .collect(),
+            )
+        }
+    }
+    impl Drop for OptionsForcees {
+        fn drop(&mut self) {
+            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap_or_else(|e| e.into_inner());
+            for (k, avant) in self.0.drain(..).rev() {
+                match avant {
+                    Some(v) => o.insert(k, v),
+                    None => o.remove(&k),
+                };
+            }
+        }
+    }
+
     /// InformaTech (S-072): the decision each login kind takes in `on_message` (`if !Self::permission(…) { "No
     /// permission of …"; return false }`), with no server grant, and with a server granting everything.
     #[test]
     fn informatech_s072_login_kinds_refused() {
+        let _serie = OVERWRITE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         // Every permission « enabled » (2 bits each = 0b10) as a rendezvous server could send it.
         let tout_accorde = Some(ControlPermissions {
             permissions: 0xAAAA_AAAA_AAAA_AAAA,
@@ -7187,33 +7222,20 @@ mod test {
         verifier("default config");
         // « Full access » mode AND every enable-… option set to Y, as a stored config or an --option could have them.
         // Held in OVERWRITE_SETTINGS for the test (the strongest source Config::get_option reads), then removed.
-        {
-            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
-            o.insert("access-mode".to_owned(), "full".to_owned());
-            for (_, option) in genres {
-                o.insert(option.to_owned(), "Y".to_owned());
-            }
-        }
+        let mut forcees = vec![("access-mode", "full")];
+        forcees.extend(genres.iter().map(|(_, option)| (*option, "Y")));
+        let _options = OptionsForcees::poser(&forcees);
         assert_eq!(Config::get_option("access-mode"), "full");
         // Proof the bypass is live in this build: with the « flutter » feature, full access turns an ordinary
         // permission on even when its option says N.
         #[cfg(feature = "flutter")]
         {
-            hbb_common::config::OVERWRITE_SETTINGS
-                .write()
-                .unwrap()
-                .insert(keys::OPTION_ENABLE_KEYBOARD.to_owned(), "N".to_owned());
+            let _clavier = OptionsForcees::poser(&[(keys::OPTION_ENABLE_KEYBOARD, "N")]);
             assert!(Connection::is_permission_enabled_locally(keys::OPTION_ENABLE_KEYBOARD));
-            hbb_common::config::OVERWRITE_SETTINGS.write().unwrap().remove(keys::OPTION_ENABLE_KEYBOARD);
         }
         verifier("access-mode=full, options Y");
-        {
-            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
-            o.remove("access-mode");
-            for (_, option) in genres {
-                o.remove(option);
-            }
-        }
+        drop(_options);
+        assert_eq!(Config::get_option("access-mode"), "");
         // The screen session's own permissions still follow the server grant.
         assert!(Connection::permission(keys::OPTION_ENABLE_KEYBOARD, &tout_accorde));
         // File transfer: its own switch (open until Adrien answers).

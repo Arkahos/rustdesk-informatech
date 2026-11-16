@@ -2457,6 +2457,12 @@ pub(crate) fn informatech_permission_refusee(option: &str) -> bool {
         || (INFORMATECH_REFUSE_TRANSFERT_FICHIERS && option == keys::OPTION_ENABLE_FILE_TRANSFER)
 }
 
+/// What a switch of the client's connection window (--cm) may set for `option`: what was asked, never « on » for a
+/// refused kind (Scylla 16/11: that switch writes the connection's flags directly, without `permission()`).
+pub(crate) fn informatech_bascule_cm(option: &str, demande: bool) -> bool {
+    demande && !informatech_permission_refusee(option)
+}
+
 /// The `enable-…` options written as « N » into OVERWRITE_SETTINGS, so every reader of the option (UI, --cm window,
 /// IPC) sees the refusal too. The decision itself is `informatech_permission_refusee`, checked first by
 /// `Connection::permission` and `Connection::is_permission_enabled_locally`.
@@ -3158,6 +3164,21 @@ mod tests {
             informatech_permissions_forcees().contains(&keys::OPTION_ENABLE_FILE_TRANSFER),
             INFORMATECH_REFUSE_TRANSFERT_FICHIERS
         );
+    }
+
+    #[test]
+    fn informatech_s072_cm_switch_cannot_enable_a_refused_kind() {
+        assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_AUDIO, true));
+        assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_AUDIO, false));
+        // File transfer follows its own switch; turning it off from the window always works.
+        assert_eq!(
+            informatech_bascule_cm(keys::OPTION_ENABLE_FILE_TRANSFER, true),
+            !INFORMATECH_REFUSE_TRANSFERT_FICHIERS
+        );
+        assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_FILE_TRANSFER, false));
+        // What the product uses is left to the client's switch.
+        assert!(informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, true));
+        assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, false));
     }
 
     #[test]
