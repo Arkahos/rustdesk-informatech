@@ -248,10 +248,42 @@ fn ecrire(e: &Etat) -> ResultType<()> {
     let d = dossier();
     // Before anything secret is written: real folders, owned by Administrators, closed to everyone else.
     proteger(&d)?;
+    // Anything left in the folder by whoever created it first (a planted .tmp, a link…) goes, except our own trusted
+    // state file: its children kept their old owner and DACL (Argos re-check 3).
+    purger(&d)?;
     let p = chemin();
     let tmp = p.with_extension("tmp");
-    std::fs::write(&tmp, serde_json::to_vec(e)?)?;
+    ecrire_neuf(&tmp, &serde_json::to_vec(e)?)?;
     std::fs::rename(&tmp, &p)?;
+    Ok(())
+}
+
+/// Keep only the trusted state file; remove_file on a link removes the link, never its target.
+fn purger(d: &std::path::Path) -> ResultType<()> {
+    for entree in std::fs::read_dir(d)? {
+        let chemin_entree = entree?.path();
+        let garder = chemin_entree.file_name().and_then(|n| n.to_str()) == Some(FICHIER) && fiable(&chemin_entree);
+        if garder {
+            continue;
+        }
+        let meta = std::fs::symlink_metadata(&chemin_entree)?;
+        if meta.is_dir() && !est_reparse(&chemin_entree) {
+            std::fs::remove_dir_all(&chemin_entree)?;
+        } else if meta.is_dir() {
+            std::fs::remove_dir(&chemin_entree)?;
+        } else {
+            std::fs::remove_file(&chemin_entree)?;
+        }
+    }
+    Ok(())
+}
+
+/// A brand-new file only: never write into a file someone else created (it would keep their owner and DACL).
+pub(crate) fn ecrire_neuf(p: &std::path::Path, octets: &[u8]) -> ResultType<()> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(p)?;
+    f.write_all(octets)?;
+    f.sync_all()?;
     Ok(())
 }
 
@@ -532,6 +564,22 @@ mod tests {
         assert!(!est_reparse(&d));
         std::fs::remove_dir(&d).unwrap();
         assert!(est_reparse(&d), "missing counts as untrusted");
+    }
+
+    #[test]
+    fn un_fichier_deja_plante_n_est_jamais_ecrit() {
+        let d = std::env::temp_dir().join(format!("a12-plante-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let tmp = d.join("informatech-rotation.tmp");
+        std::fs::write(&tmp, b"planted").unwrap();
+        assert!(ecrire_neuf(&tmp, b"SECRET").is_err(), "an existing file is refused");
+        assert_eq!(std::fs::read(&tmp).unwrap(), b"planted", "and left untouched");
+        std::fs::remove_file(&tmp).unwrap();
+        ecrire_neuf(&tmp, b"neuf").unwrap();
+        assert_eq!(std::fs::read(&tmp).unwrap(), b"neuf");
+        purger(&d).unwrap();
+        assert!(std::fs::read_dir(&d).unwrap().next().is_none(), "untrusted entries purged");
+        std::fs::remove_dir(&d).unwrap();
     }
 
     #[test]
