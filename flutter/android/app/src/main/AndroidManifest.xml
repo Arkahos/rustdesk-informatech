@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <!-- InformaTech (A1): no QR scan in the viewer; the plugin's camera permission is dropped from the merged manifest. -->
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- InformaTech (A1): viewer only. The « be controlled » side (screen capture, accessibility input, boot start,
          floating window, microphone) is removed from the manifest; its classes stay compiled but cannot run. -->
