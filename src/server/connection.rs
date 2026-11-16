@@ -2647,6 +2647,13 @@ impl Connection {
         )
     }
 
+    /// InformaTech (S-072): the hard refusal of a login kind, named by its `enable-…` key. It reads nothing at run
+    /// time (no option, no access mode, no control permissions): only the list compiled into this engine.
+    #[inline]
+    fn informatech_login_refuse(enable_prefix_option: &str) -> bool {
+        crate::common::informatech_permission_refusee(enable_prefix_option)
+    }
+
     fn permission(
         enable_prefix_option: &str,
         control_permissions: &Option<ControlPermissions>,
@@ -2884,10 +2891,13 @@ impl Connection {
             }
             match lr.union {
                 Some(login_request::Union::FileTransfer(ft)) => {
-                    if !Self::permission(
-                        keys::OPTION_ENABLE_FILE_TRANSFER,
-                        &self.control_permissions,
-                    ) {
+                    // InformaTech (S-072): same lock, on its own switch (INFORMATECH_REFUSE_TRANSFERT_FICHIERS).
+                    if Self::informatech_login_refuse(keys::OPTION_ENABLE_FILE_TRANSFER)
+                        || !Self::permission(
+                            keys::OPTION_ENABLE_FILE_TRANSFER,
+                            &self.control_permissions,
+                        )
+                    {
                         self.send_login_error("No permission of file transfer")
                             .await;
                         sleep(1.).await;
@@ -2896,7 +2906,10 @@ impl Connection {
                     self.file_transfer = Some((ft.dir, ft.show_hidden));
                 }
                 Some(login_request::Union::ViewCamera(_vc)) => {
-                    if !Self::permission(keys::OPTION_ENABLE_CAMERA, &self.control_permissions) {
+                    // InformaTech (S-072): refused in the branch itself, whatever option, access mode or server grant.
+                    if Self::informatech_login_refuse(keys::OPTION_ENABLE_CAMERA)
+                        || !Self::permission(keys::OPTION_ENABLE_CAMERA, &self.control_permissions)
+                    {
                         self.send_login_error("No permission of viewing camera")
                             .await;
                         sleep(1.).await;
@@ -2905,7 +2918,10 @@ impl Connection {
                     self.view_camera = true;
                 }
                 Some(login_request::Union::Terminal(terminal)) => {
-                    if !Self::permission(keys::OPTION_ENABLE_TERMINAL, &self.control_permissions) {
+                    // InformaTech (S-072): refused in the branch itself.
+                    if Self::informatech_login_refuse(keys::OPTION_ENABLE_TERMINAL)
+                        || !Self::permission(keys::OPTION_ENABLE_TERMINAL, &self.control_permissions)
+                    {
                         self.send_login_error("No permission of terminal").await;
                         sleep(1.).await;
                         return false;
@@ -2926,7 +2942,10 @@ impl Connection {
                     self.terminal_service_id = terminal.service_id;
                 }
                 Some(login_request::Union::PortForward(mut pf)) => {
-                    if !Self::permission(keys::OPTION_ENABLE_TUNNEL, &self.control_permissions) {
+                    // InformaTech (S-072): refused in the branch itself (TCP tunnel and RDP alike).
+                    if Self::informatech_login_refuse(keys::OPTION_ENABLE_TUNNEL)
+                        || !Self::permission(keys::OPTION_ENABLE_TUNNEL, &self.control_permissions)
+                    {
                         self.send_login_error("No permission of IP tunneling").await;
                         sleep(1.).await;
                         return false;
@@ -7151,15 +7170,49 @@ mod test {
             ),
             Some(true)
         );
-        for (genre, option) in [
+        let genres = [
             ("port forward / RDP login", keys::OPTION_ENABLE_TUNNEL),
             ("terminal login", keys::OPTION_ENABLE_TERMINAL),
             ("camera login", keys::OPTION_ENABLE_CAMERA),
             ("audio", keys::OPTION_ENABLE_AUDIO),
-        ] {
-            assert!(!Connection::permission(option, &None), "{genre}");
-            assert!(!Connection::permission(option, &tout_accorde), "{genre}, server grant");
-            assert!(!Connection::is_permission_enabled_locally(option), "{genre}, local");
+        ];
+        let verifier = |cas: &str| {
+            for (genre, option) in genres {
+                assert!(Connection::informatech_login_refuse(option), "{genre}, branch lock, {cas}");
+                assert!(!Connection::permission(option, &None), "{genre}, {cas}");
+                assert!(!Connection::permission(option, &tout_accorde), "{genre}, server grant, {cas}");
+                assert!(!Connection::is_permission_enabled_locally(option), "{genre}, local, {cas}");
+            }
+        };
+        verifier("default config");
+        // « Full access » mode AND every enable-… option set to Y, as a stored config or an --option could have them.
+        // Held in OVERWRITE_SETTINGS for the test (the strongest source Config::get_option reads), then removed.
+        {
+            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
+            o.insert("access-mode".to_owned(), "full".to_owned());
+            for (_, option) in genres {
+                o.insert(option.to_owned(), "Y".to_owned());
+            }
+        }
+        assert_eq!(Config::get_option("access-mode"), "full");
+        // Proof the bypass is live in this build: with the « flutter » feature, full access turns an ordinary
+        // permission on even when its option says N.
+        #[cfg(feature = "flutter")]
+        {
+            hbb_common::config::OVERWRITE_SETTINGS
+                .write()
+                .unwrap()
+                .insert(keys::OPTION_ENABLE_KEYBOARD.to_owned(), "N".to_owned());
+            assert!(Connection::is_permission_enabled_locally(keys::OPTION_ENABLE_KEYBOARD));
+            hbb_common::config::OVERWRITE_SETTINGS.write().unwrap().remove(keys::OPTION_ENABLE_KEYBOARD);
+        }
+        verifier("access-mode=full, options Y");
+        {
+            let mut o = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
+            o.remove("access-mode");
+            for (_, option) in genres {
+                o.remove(option);
+            }
         }
         // The screen session's own permissions still follow the server grant.
         assert!(Connection::permission(keys::OPTION_ENABLE_KEYBOARD, &tout_accorde));
