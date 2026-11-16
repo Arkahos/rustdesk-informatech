@@ -671,6 +671,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
 
     if is_server {
         crate::common::set_server_running(true);
+        // InformaTech (A12): rotation of the permanent password, driven by this process's authorized connections.
+        #[cfg(windows)]
+        crate::informatech_rotation::demarrer(informatech_nb_connexions_autorisees);
         std::thread::spawn(move || {
             if let Err(err) = crate::ipc::start("") {
                 log::error!("Failed to start ipc: {}", err);
@@ -938,4 +941,10 @@ pub async fn stop_main_window_process() {
             log::error!("kill failed: {}", e);
         }
     }
+}
+
+/// InformaTech (A12): number of authorized incoming connections of this `--server` process.
+#[cfg(windows)]
+pub(crate) fn informatech_nb_connexions_autorisees() -> usize {
+    connection::AUTHED_CONNS.lock().map(|c| c.len()).unwrap_or(0)
 }

@@ -476,6 +476,20 @@ pub fn core_main() -> Option<Vec<String>> {
         } else if args[0] == "--get-id" {
             println!("{}", crate::ipc::get_id());
             return None;
+        } else if args[0] == "--informatech-rotation" {
+            // InformaTech (A12): configuration read from stdin (never from the command line), elevated only.
+            #[cfg(windows)]
+            {
+                if crate::platform::is_installed() && is_root() {
+                    match crate::informatech_rotation::commande(&args[1..]) {
+                        Ok(()) => println!("Done!"),
+                        Err(err) => println!("{err}"),
+                    }
+                } else {
+                    println!("Installation and administrative privileges required!");
+                }
+            }
+            return None;
         } else if args[0] == "--close-connections" {
             // InformaTech: end every incoming session on this computer (hub « Terminer la session »).
             match crate::common::informatech_close_connections() {
