@@ -774,6 +774,9 @@ class _GeneralState extends State<_General> {
       String root_dir = map['root_dir']!;
       bool root_dir_exists = map['root_dir_exists']!;
       bool user_dir_exists = map['user_dir_exists']!;
+      // InformaTech (Styx 16/11): a session is never recorded, so the whole « Recording » card is gone: no
+      // auto-record switches, no recording folders (the engine refuses anyway: INFORMATECH_SANS_CAPTURE).
+      if (kInformatechSansCapture) return const Offstage();
       return _Card(title: 'Recording', children: [
         if (!bind.isOutgoingOnly())
           _OptionCheckBox(context, 'Automatically record incoming sessions',
