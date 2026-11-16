@@ -53,7 +53,8 @@ class BarreHaut extends StatefulWidget implements PreferredSizeWidget {
   const BarreHaut({super.key, required this.poste, this.client, required this.etat, required this.debut, required this.onTerminer});
   final String poste;
   final String? client;
-  final EtatLien etat;
+  /// Read at every tick (once a second), so an outage shows without a rebuild from the page.
+  final EtatLien Function() etat;
   final DateTime debut;
   final VoidCallback onTerminer;
 
@@ -91,7 +92,7 @@ class _BarreHautState extends State<BarreHaut> {
           padding: const EdgeInsets.only(left: 14, right: 10),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Charte.trait))),
           child: Row(children: [
-            Container(width: 8, height: 8, decoration: BoxDecoration(color: couleurEtat(widget.etat), shape: BoxShape.circle)),
+            Container(width: 8, height: 8, decoration: BoxDecoration(color: couleurEtat(widget.etat()), shape: BoxShape.circle)),
             const SizedBox(width: 10),
             Expanded(
               child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [

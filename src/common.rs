@@ -2407,9 +2407,28 @@ pub(crate) fn informatech_viewer_accepte(conn_type: hbb_common::rendezvous_proto
     conn_type == hbb_common::rendezvous_proto::ConnType::DEFAULT_CONN
 }
 
-/// InformaTech (OPMD Android viewer, D10): the sentence shown when a refused kind is asked for.
+/// InformaTech (OPMD Android viewer, D10): what is shown when a refused kind is asked for (file transfer, camera,
+/// terminal, port forward, RDP alike).
+pub(crate) const INFORMATECH_VIEWER_REFUS_TITRE: &str = "Non disponible";
 pub(crate) const INFORMATECH_VIEWER_REFUS: &str =
-    "Le transfert de fichiers n’est pas disponible dans InformaTech Assistance.";
+    "InformaTech Assistance n’ouvre que l’écran du poste : ce type de connexion n’est pas disponible.";
+
+/// InformaTech (OPMD Android viewer, D10): UI messages the viewer's session loop drops: every file operation
+/// (send, receive, resume, delete, create, rename). Belt to `informatech_viewer_accepte` (Argos P4).
+pub(crate) fn informatech_viewer_ignore(data: &crate::client::Data) -> bool {
+    use crate::client::Data;
+    matches!(
+        data,
+        Data::SendFiles(_)
+            | Data::AddJob(_)
+            | Data::ResumeJob(_)
+            | Data::RemoveDirAll(_)
+            | Data::RemoveDir(_)
+            | Data::RemoveFile(_)
+            | Data::CreateDir(_)
+            | Data::RenameFile(_)
+    )
+}
 
 pub(crate) fn apply_informatech_defaults() {
     // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
@@ -3066,6 +3085,24 @@ mod tests {
         ] {
             assert!(!informatech_viewer_accepte(refuse), "{refuse:?}");
         }
+    }
+
+    #[test]
+    fn informatech_viewer_drops_file_operations() {
+        use crate::client::Data;
+        let s = String::new;
+        for d in [
+            Data::RemoveDir((1, s())),
+            Data::RemoveDirAll((1, s(), false, false)),
+            Data::RemoveFile((1, s(), 0, false)),
+            Data::CreateDir((1, s(), false)),
+            Data::RenameFile((1, s(), s(), false)),
+            Data::ResumeJob((1, false)),
+        ] {
+            assert!(informatech_viewer_ignore(&d));
+        }
+        assert!(!informatech_viewer_ignore(&Data::Close));
+        assert!(!informatech_viewer_ignore(&Data::CancelJob(1)));
     }
 
     #[test]

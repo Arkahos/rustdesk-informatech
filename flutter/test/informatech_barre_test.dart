@@ -24,6 +24,19 @@ Widget _barre({required bool confirme, int ecrans = 1, bool clavier = true, Void
     );
 
 void main() {
+  testWidgets('the state dot follows the link: mint connected, amber connecting, coral lost', (t) async {
+    var etat = EtatLien.connecte;
+    await t.pumpWidget(MaterialApp(
+        home: Scaffold(appBar: BarreHaut(poste: 'PC-SALON', etat: () => etat, debut: DateTime.now(), onTerminer: () {}))));
+    Color point() => ((t.widgetList<Container>(find.byType(Container)).firstWhere((c) => c.constraints?.maxWidth == 8).decoration) as BoxDecoration).color!;
+    expect(point(), couleurEtat(EtatLien.connecte));
+    etat = EtatLien.perdu;
+    await t.pump(const Duration(seconds: 1));
+    expect(point(), couleurEtat(EtatLien.perdu));
+    expect(find.text('PC-SALON'), findsOneWidget);
+    expect(find.text('Terminer'), findsOneWidget);
+  });
+
   test('duration reads mm:ss, then h:mm:ss', () {
     expect(dureeSession(const Duration(minutes: 12, seconds: 4)), '12:04');
     expect(dureeSession(const Duration(hours: 1, minutes: 2, seconds: 4)), '1:02:04');

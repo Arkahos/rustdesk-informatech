@@ -8,7 +8,10 @@
 /// Longest wait between two retries, in seconds.
 const informatechDelaiMaxS = 4;
 
-/// Retries stop after this long (A12 grace of 180 s, plus the time the PC may take to notice the drop).
+/// Retries stop after this long. Worst case for the PC's rotation after a silent drop (Argos 16/11): 30 s (the PC's
+/// receive timeout, connection.rs SEC30) + 180 s (A12 GRACE_S) + 15 s (one PAS tick) = 225 s. At 240 s the PC has
+/// rotated for sure, so « Rouvrez la session » works at once; stopping before 225 s could send Adrien to a
+/// `mot_de_passe_utilise` refusal.
 const informatechAbandonApres = Duration(seconds: 240);
 
 /// The next wait (seconds) after a wait of [actuel] seconds: 1, 2, 4, 4, 4…

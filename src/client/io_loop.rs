@@ -191,11 +191,13 @@ impl<T: InvokeUiSession> Remote<T> {
             ConnType::default()
         };
         // InformaTech (OPMD Android viewer, D10): no connection other than a screen session ever leaves the phone.
+        // The gate reads the session's own type (lc.conn_type): the local `conn_type` above never says port forward or
+        // RDP, which would then pass as a screen session (Argos P2).
         #[cfg(target_os = "android")]
-        if !crate::common::informatech_viewer_accepte(conn_type) {
+        if !crate::common::informatech_viewer_accepte(self.handler.lc.read().unwrap().conn_type) {
             self.handler.msgbox(
                 "error",
-                "Transfert de fichiers",
+                crate::common::INFORMATECH_VIEWER_REFUS_TITRE,
                 crate::common::INFORMATECH_VIEWER_REFUS,
                 "",
             );
@@ -733,6 +735,11 @@ impl<T: InvokeUiSession> Remote<T> {
     }
 
     async fn handle_msg_from_ui(&mut self, data: Data, peer: &mut Stream) -> bool {
+        // InformaTech (OPMD Android viewer, D10): no file operation leaves the phone, whatever the Dart side sends.
+        #[cfg(target_os = "android")]
+        if crate::common::informatech_viewer_ignore(&data) {
+            return true;
+        }
         match data {
             Data::Close => {
                 self.send_close_reason(peer, "").await;

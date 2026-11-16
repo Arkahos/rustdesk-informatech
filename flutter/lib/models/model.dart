@@ -124,6 +124,7 @@ class FfiModel with ChangeNotifier {
   DateTime? _offlineReconnectStartTime;
   /// InformaTech (OPMD Android, D17): when the current run of automatic retries began (null while connected).
   DateTime? _informatechPerteDepuis;
+  bool get informatechPerte => _informatechPerteDepuis != null;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
   bool _viewOnly = false;
@@ -258,6 +259,9 @@ class FfiModel with ChangeNotifier {
     _inputBlocked = false;
     _timer?.cancel();
     _timer = null;
+    // InformaTech (D17, Argos P3): a retry run left open by « Terminer » must not count against the next session.
+    _informatechPerteDepuis = null;
+    _reconnects = 1;
     _androidDocumentPickerActive = false;
     _androidDocumentPickerInterruptedConnection = false;
     resetRestartReconnectState();

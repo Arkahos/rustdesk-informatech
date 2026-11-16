@@ -501,9 +501,11 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
         preferredSize: const Size.fromHeight(52),
         child: Obx(() => BarreHaut(
               poste: _itPoste,
-              etat: gFFI.ffiModel.pi.isSet.isTrue && gFFI.ffiModel.waitForFirstImage.isFalse
-                  ? EtatLien.connecte
-                  : EtatLien.connexion,
+              etat: () => gFFI.ffiModel.informatechPerte
+                  ? EtatLien.perdu
+                  : gFFI.ffiModel.pi.isSet.isTrue && gFFI.ffiModel.waitForFirstImage.isFalse
+                      ? EtatLien.connecte
+                      : EtatLien.connexion,
               debut: _itDebut,
               onTerminer: () => setState(() => _itConfirme = true),
             )),
