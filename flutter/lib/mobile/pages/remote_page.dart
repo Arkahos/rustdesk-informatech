@@ -178,7 +178,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     // The inner logic of `on_voice_call_closed` will check if the voice call is active.
     // Only one client is considered here for now.
     gFFI.chatModel.onVoiceCallClosed("End connection");
-    if (isAndroid) platformFFI.invokeMethod('informatech_session', false);
+    if (isAndroid) {
+      platformFFI.invokeMethod('informatech_session', false);
+      // InformaTech (A1, Argos P3): no peer file survives the session. Again a little later: the session may still
+      // write its config while it closes.
+      bind.mainInformatechEffacerTraces();
+      Future.delayed(const Duration(seconds: 3), () => bind.mainInformatechEffacerTraces());
+    }
   }
 
   @override

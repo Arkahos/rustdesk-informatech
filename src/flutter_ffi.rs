@@ -1845,6 +1845,16 @@ pub fn main_remove_peer(id: String) {
     PeerConfig::remove(&id);
 }
 
+/// InformaTech (OPMD Android, A1, Argos P3): the viewer keeps no trace of the PCs it controlled. Removes every
+/// peers/<id>.toml (id, hostname, user, options, any stored password) and the last remote id. Called at session end
+/// and at start-up (covers a session killed before its end).
+pub fn main_informatech_effacer_traces() {
+    for (id, _, _) in PeerConfig::peers(None) {
+        PeerConfig::remove(&id);
+    }
+    hbb_common::config::LocalConfig::set_remote_id("");
+}
+
 pub fn main_has_hwcodec() -> SyncReturn<bool> {
     SyncReturn(has_hwcodec())
 }

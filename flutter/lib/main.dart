@@ -185,6 +185,8 @@ void runMobileApp() async {
   await initUniLinks();
   // InformaTech (A1): a cold start from « InformaTech Admin » finds its session waiting.
   if (isAndroid) {
+    // A1 (Argos P3): traces of a session killed before its end go at start-up.
+    bind.mainInformatechEffacerTraces();
     WidgetsBinding.instance.addPostFrameCallback((_) => informatechPrendreConnexion());
   }
 }
