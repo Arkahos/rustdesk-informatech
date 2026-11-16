@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/mobile/informatech_reconnexion.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/cm_file_model.dart';
@@ -121,6 +122,8 @@ class FfiModel with ChangeNotifier {
   Timer? _restartReconnectDelayTimer;
   var _reconnects = 1;
   DateTime? _offlineReconnectStartTime;
+  /// InformaTech (OPMD Android, D17): when the current run of automatic retries began (null while connected).
+  DateTime? _informatechPerteDepuis;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
   bool _viewOnly = false;
@@ -908,7 +911,16 @@ class FfiModel with ChangeNotifier {
       parent.target?.inputModel.setRelativeMouseMode(false);
     }
 
-    if (type == 're-input-password') {
+    if (isAndroid && (type == 're-input-password' || type == 'input-password')) {
+      // InformaTech (OPMD Android, A1/D4/D17): the password is never typed on the phone. A refused one means the PC
+      // already rotated it (reconnect after the A12 grace): the way back is a new open from InformaTech Admin.
+      _timer?.cancel();
+      _timer = null;
+      _reconnects = 1;
+      _informatechPerteDepuis = null;
+      msgBox(sessionId, 'error', InformatechReconnexion.perteTitre,
+          InformatechReconnexion.perteCorps, '', dialogManager);
+    } else if (type == 're-input-password') {
       wrongPasswordDialog(sessionId, dialogManager, type, title, text);
     } else if (type == 'input-2fa') {
       enter2FaDialog(sessionId, dialogManager);
@@ -1058,6 +1070,20 @@ class FfiModel with ChangeNotifier {
   showMsgBox(SessionID sessionId, String type, String title, String text,
       String link, bool hasRetry, OverlayDialogManager dialogManager,
       {bool? hasCancel}) async {
+    // InformaTech (OPMD Android, D17): the client PC draws a new OPMD password 3 min after the session dropped (A12
+    // grace), so retrying past that only fails. Stop with a sentence that says what to do and that a recipe goes on.
+    if (isAndroid && hasRetry) {
+      _informatechPerteDepuis ??= DateTime.now();
+      if (informatechAbandonner(_informatechPerteDepuis!, DateTime.now())) {
+        _timer?.cancel();
+        _timer = null;
+        _reconnects = 1;
+        _informatechPerteDepuis = null;
+        msgBox(sessionId, 'error', InformatechReconnexion.perteTitre,
+            InformatechReconnexion.perteCorps, '', dialogManager);
+        return;
+      }
+    }
     final noteAllowed = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
         (title == "Connection Error" || type == "restarting");
@@ -1089,7 +1115,8 @@ class FfiModel with ChangeNotifier {
       _timer = Timer(Duration(seconds: _reconnects), () {
         reconnect(dialogManager, sessionId, false);
       });
-      _reconnects *= 2;
+      // InformaTech (OPMD Android, D17): short steps so the session is back seconds after the network is.
+      _reconnects = isAndroid ? informatechProchainDelai(_reconnects) : _reconnects * 2;
     } else {
       _reconnects = 1;
       _offlineReconnectStartTime = null;
@@ -1447,6 +1474,7 @@ class FfiModel with ChangeNotifier {
       if (displays.isNotEmpty) {
         _reconnects = 1;
         _offlineReconnectStartTime = null;
+        _informatechPerteDepuis = null;
         resetRestartReconnectState();
         waitForFirstImage.value = true;
         isRefreshing = false;
