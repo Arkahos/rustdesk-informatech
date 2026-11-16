@@ -275,7 +275,11 @@ class MainActivity : FlutterActivity() {
                 // InformaTech (D10): after « Terminer », bring « InformaTech Admin » to the front, where « Terminer la
                 // session » is. A plain launcher intent: no data, no extra, no new exported component on either side.
                 "informatech_ouvrir_admin" -> {
-                    val i = packageManager.getLaunchIntentForPackage(PAQUET_ADMIN)
+                    // Only the real one: a package of that name signed with another certificate is never opened
+                    // (Argos 16/11), the same check « InformaTech Admin » makes before CONNECTER.
+                    val memeSignature = packageManager.checkSignatures(packageName, PAQUET_ADMIN) ==
+                        android.content.pm.PackageManager.SIGNATURE_MATCH
+                    val i = if (memeSignature) packageManager.getLaunchIntentForPackage(PAQUET_ADMIN) else null
                     if (i != null) startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     result.success(i != null)
                 }
