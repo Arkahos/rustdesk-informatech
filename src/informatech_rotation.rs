@@ -188,7 +188,7 @@ fn proprietaire(p: &std::path::Path) -> Proprietaire {
     resultat
 }
 
-fn fiable(p: &std::path::Path) -> bool {
+pub(crate) fn fiable(p: &std::path::Path) -> bool {
     digne_de_confiance(est_reparse(p), proprietaire(p))
 }
 
@@ -198,8 +198,26 @@ fn etat_fiable() -> bool {
     d.parent().is_some_and(fiable) && fiable(&d) && fiable(&chemin())
 }
 
-fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
-    std::process::Command::new(programme)
+/// A Windows tool by its full System32 path, asked to Windows itself: no PATH search, no environment variable a
+/// user could set, no shell (Scylla 17/11).
+fn systeme32(programme: &str) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut tampon = [0u16; 260];
+    // SAFETY: the buffer is a local array; the call writes at most its length.
+    let n = unsafe { GetSystemDirectoryW(Some(&mut tampon)) } as usize;
+    if n == 0 || n >= tampon.len() {
+        return None;
+    }
+    Some(PathBuf::from(std::ffi::OsString::from_wide(&tampon[..n])).join(programme))
+}
+
+/// Runs `takeown.exe` or `icacls.exe` (file name with its extension) from System32.
+pub(crate) fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
+    let Some(exe) = systeme32(programme) else {
+        return false;
+    };
+    std::process::Command::new(exe)
         .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -218,16 +236,31 @@ fn proteger(d: &std::path::Path) -> ResultType<()> {
             std::fs::remove_dir(&n)?;
         }
         std::fs::create_dir_all(&n)?;
-        let c = n.as_os_str();
-        let ok = commande_ok("takeown", &[std::ffi::OsStr::new("/F"), c, std::ffi::OsStr::new("/A")])
-            && commande_ok("icacls", &[c, std::ffi::OsStr::new("/reset")])
-            && commande_ok(
-                "icacls",
-                &[c, std::ffi::OsStr::new("/inheritance:r"), std::ffi::OsStr::new("/grant:r"), std::ffi::OsStr::new("*S-1-5-18:(OI)(CI)F"), std::ffi::OsStr::new("*S-1-5-32-544:(OI)(CI)F")],
-            );
-        if !ok || !fiable(&n) {
+        // This writer is elevated and takes a folder a user created first; the service never does (S-076 C).
+        if !commande_ok("takeown.exe", &[std::ffi::OsStr::new("/F"), n.as_os_str(), std::ffi::OsStr::new("/A")]) {
             hbb_common::anyhow::bail!("state folder not trusted");
         }
+        poser_dacl(&n, false)?;
+    }
+    Ok(())
+}
+
+/// THE closed DACL of InformaTech's machine folders, in one place (Scylla 17/11: the connection log's parent gets the
+/// same two entries as this writer's, from one function): SYSTEM and Administrators full, nothing inherited.
+/// `lecture_utilisateurs` adds ONE entry, read + execute for BUILTIN\Users: only the folder of the connection log
+/// (informatech_journal.rs), which the client's Hub reads without elevation. `/L`: icacls works on the path itself,
+/// never through a link. Refuses if the folder is not trusted afterwards.
+pub(crate) fn poser_dacl(n: &std::path::Path, lecture_utilisateurs: bool) -> ResultType<()> {
+    use std::ffi::OsStr;
+    let c = n.as_os_str();
+    let mut droits = vec![c, OsStr::new("/inheritance:r"), OsStr::new("/grant:r"), OsStr::new("*S-1-5-18:(OI)(CI)F"), OsStr::new("*S-1-5-32-544:(OI)(CI)F")];
+    if lecture_utilisateurs {
+        droits.push(OsStr::new("*S-1-5-32-545:(OI)(CI)RX"));
+    }
+    droits.push(OsStr::new("/L"));
+    let ok = commande_ok("icacls.exe", &[c, OsStr::new("/reset"), OsStr::new("/L")]) && commande_ok("icacls.exe", &droits);
+    if !ok || !fiable(n) {
+        hbb_common::anyhow::bail!("state folder not trusted");
     }
     Ok(())
 }

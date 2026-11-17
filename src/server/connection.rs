@@ -1920,6 +1920,15 @@ impl Connection {
             self.tx_from_authed.clone(),
             self.lr.clone(),
         ));
+        // InformaTech (S-076 C): every authorized connection is noted on the PC itself, whoever opened it.
+        #[cfg(windows)]
+        crate::informatech_journal::debut(
+            self.inner.id(),
+            auth_conn_type.as_str(),
+            &self.lr.my_id,
+            &self.lr.my_name,
+            &self.ip,
+        );
         self.session_last_recv_time = SESSIONS
             .lock()
             .unwrap()
@@ -7017,6 +7026,9 @@ mod raii {
 
     impl Drop for AuthedConnID {
         fn drop(&mut self) {
+            // InformaTech (S-076 C): the end of what `debut` noted when this connection was authorized.
+            #[cfg(windows)]
+            crate::informatech_journal::fin(self.0);
             if self.1 == AuthConnType::Remote || self.1 == AuthConnType::ViewCamera {
                 scrap::codec::Encoder::update(scrap::codec::EncodingUpdate::Remove(self.0));
                 video_service::VIDEO_QOS

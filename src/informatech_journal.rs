@@ -1,0 +1,493 @@
+//! InformaTech (S-076 C, Adrien 17/11): the OPMD service keeps a local log of every AUTHORIZED incoming connection,
+//! also when nobody is logged on to Windows. The client's Hub reads it at the next logon, shows it and reports it
+//! (Zoro); it is the only trace that also sees a connection that did not go through InformaTech's server.
+//!
+//! - Written by the `--server` process (SYSTEM): one line when an authorized connection opens, one when it closes.
+//! - File: `%ProgramData%\InformaTech\OPMD-journal\connexions.jsonl`, UTF-8, one JSON object per line, `\n` ended.
+//!   The folder is NOT A12's (`OPMD`, SYSTEM and Administrators only): the Hub reads the log as the logged-on user,
+//!   so this one adds a read-only entry for BUILTIN\Users. The parent keeps A12's two entries: a user opens the file by
+//!   its full path (bypass traverse checking), and cannot plant anything next to it.
+//! - Lines (format agreed with Zoro, 17/11; `t` = seconds since 1970 UTC):
+//!   `{"v":1,"evt":"debut","id":"<16 hex>","t":…,"type":"controle","pair":"…","nom":"…","ip":"…"|null,"sessionOuverte":true|false}`
+//!   `{"v":1,"evt":"fin","id":"<same>","t":…}`
+//!   A « debut » with no « fin » means the engine stopped or the PC was cut. Nothing secret is ever written. `pair`
+//!   and `nom` are what the remote side DECLARES: a reader shows them as such, never as a verified identity.
+//! - Scylla's ruling (17/11): a level that is not trusted (not a real folder, a reparse point, an owner other than
+//!   SYSTEM or Administrators) is never taken over, reset, deleted or written through: the connection is simply not
+//!   logged and one fixed event says so. The service only creates what is missing, only touches what already passed
+//!   the trust check, and deletes nothing but its own temporary file.
+//! - Best effort: the session's path only drops a message in a bounded queue; a thread of its own writes. A failure
+//!   never blocks, delays or ends a session, and is not retried in a loop.
+//! - The log is the client's record: nothing in the engine removes it (it survives « retirer » and an uninstall).
+//!   Kept lines stay byte-identical; above 256 KB only the most recent lines stay (at most 500).
+
+#![cfg_attr(not(windows), allow(dead_code))]
+
+use serde_derive::Serialize;
+use std::path::Path;
+
+/// Folder name under `%ProgramData%\InformaTech`, and file name: pinned by the Hub (Zoro).
+pub(crate) const DOSSIER: &str = "OPMD-journal";
+pub(crate) const FICHIER: &str = "connexions.jsonl";
+const TEMPORAIRE: &str = "connexions.tmp";
+const MAX_OCTETS: usize = 256 * 1024;
+const LIGNES_GARDEES: usize = 500;
+const MAX_LIGNE: usize = 1024;
+const MAX_TEXTE: usize = 64;
+
+#[derive(Serialize)]
+struct Debut<'a> {
+    v: u8,
+    evt: &'static str,
+    id: &'a str,
+    t: u64,
+    #[serde(rename = "type")]
+    genre: &'static str,
+    pair: &'a str,
+    nom: &'a str,
+    ip: Option<&'a str>,
+    #[serde(rename = "sessionOuverte")]
+    session_ouverte: bool,
+}
+
+#[derive(Serialize)]
+struct Fin<'a> {
+    v: u8,
+    evt: &'static str,
+    id: &'a str,
+    t: u64,
+}
+
+/// The log's word for a connection kind (`AuthConnType::as_str`). With S-072 only « controle » can open; the others
+/// are named so that a different build would still be told apart.
+pub(crate) fn genre(conn_type: &str) -> &'static str {
+    match conn_type {
+        "remote" => "controle",
+        "file_transfer" => "fichiers",
+        "port_forward" => "tunnel",
+        "view_camera" => "camera",
+        "terminal" => "terminal",
+        _ => "autre",
+    }
+}
+
+/// What the peer announces about itself is its own text: no control character, 64 characters at most.
+pub(crate) fn nettoyer(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(MAX_TEXTE).collect()
+}
+
+pub(crate) fn ligne_debut(id: &str, t: u64, genre: &'static str, pair: &str, nom: &str, ip: &str, session_ouverte: bool) -> String {
+    let (pair, nom, ip) = (nettoyer(pair), nettoyer(nom), nettoyer(ip));
+    let ligne = Debut { v: 1, evt: "debut", id, t, genre, pair: &pair, nom: &nom, ip: (!ip.is_empty()).then_some(ip.as_str()), session_ouverte };
+    serde_json::to_string(&ligne).unwrap_or_default()
+}
+
+pub(crate) fn ligne_fin(id: &str, t: u64) -> String {
+    serde_json::to_string(&Fin { v: 1, evt: "fin", id, t }).unwrap_or_default()
+}
+
+/// A line this module could have written: the only ones kept when the file is re-created.
+pub(crate) fn ligne_valide(l: &[u8]) -> bool {
+    if l.is_empty() || l.len() > MAX_LIGNE {
+        return false;
+    }
+    let Ok(serde_json::Value::Object(o)) = serde_json::from_slice::<serde_json::Value>(l) else {
+        return false;
+    };
+    o.get("v").and_then(|v| v.as_u64()) == Some(1)
+        && matches!(o.get("evt").and_then(|v| v.as_str()), Some("debut") | Some("fin"))
+        && o.get("id").and_then(|v| v.as_str()).is_some_and(|i| i.len() == 16 && i.bytes().all(|b| b.is_ascii_hexdigit()))
+        && o.get("t").is_some_and(|v| v.is_u64())
+}
+
+/// The content to keep from an existing file: its valid lines, untouched; when they weigh more than the cap, only the
+/// most recent ones (at most `LIGNES_GARDEES`, and half the cap, so the next trim is not one line away).
+pub(crate) fn garder(contenu: &[u8]) -> Vec<u8> {
+    let valides: Vec<&[u8]> = contenu.split(|b| *b == b'\n').filter(|l| ligne_valide(l)).collect();
+    let total: usize = valides.iter().map(|l| l.len() + 1).sum();
+    let mut premier = 0;
+    if total > MAX_OCTETS {
+        premier = valides.len();
+        let mut octets = 0;
+        while premier > 0 && valides.len() - premier < LIGNES_GARDEES && octets + valides[premier - 1].len() + 1 <= MAX_OCTETS / 2 {
+            premier -= 1;
+            octets += valides[premier].len() + 1;
+        }
+    }
+    let mut sortie = Vec::with_capacity(total.min(MAX_OCTETS));
+    for l in &valides[premier..] {
+        sortie.extend_from_slice(l);
+        sortie.push(b'\n');
+    }
+    sortie
+}
+
+/// What an existing log holds, or nothing when it is far too big to be ours.
+pub(crate) fn lire(p: &Path) -> Vec<u8> {
+    match std::fs::metadata(p) {
+        Ok(m) if m.len() as usize <= 4 * MAX_OCTETS => std::fs::read(p).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// What the trust check says of one level of the path (the parent folder, the log folder, the log file).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Niveau {
+    /// Nothing there: the service may create it.
+    Absent,
+    /// A real folder or file (no reparse point) owned by SYSTEM or Administrators.
+    Fiable,
+    /// Anything else: a link, an owner that is a user, something unreadable.
+    Douteux,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Plan {
+    /// Log, creating what is missing.
+    Ecrire { creer_parent: bool, creer_dossier: bool },
+    /// Do not log, and touch nothing: no takeover, no reset, no delete (Scylla 17/11).
+    Passer,
+}
+
+/// What the service does given the three levels. One untrusted level is enough to do nothing at all.
+pub(crate) fn plan(parent: Niveau, dossier: Niveau, fichier: Niveau) -> Plan {
+    use Niveau::*;
+    match (parent, dossier, fichier) {
+        (Douteux, _, _) | (_, Douteux, _) | (_, _, Douteux) => Plan::Passer,
+        // Something that exists under a level that does not: not a state to act on.
+        (Absent, Fiable, _) | (_, Absent, Fiable) => Plan::Passer,
+        (p, d, _) => Plan::Ecrire { creer_parent: p == Absent, creer_dossier: d == Absent },
+    }
+}
+
+/// Re-creates the log of folder `d` from `ancien` (see `garder`): written to a brand-new temporary file, then renamed
+/// over the log. Nothing else in the folder is touched. The only thing deleted is this module's own temporary file,
+/// one file, never a folder and never recursively: if that name is anything else, this fails and nothing is logged.
+pub(crate) fn recreer(d: &Path, ancien: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = d.join(TEMPORAIRE);
+    match std::fs::symlink_metadata(&tmp) {
+        Ok(m) if m.is_file() => std::fs::remove_file(&tmp)?,
+        Ok(_) => return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "temporary name taken by something else")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    f.write_all(&garder(ancien))?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, d.join(FICHIER))
+}
+
+/// Appends one line to the log `recreer` made (never creates the file), and trims it when it passes the cap.
+pub(crate) fn ajouter(d: &Path, ligne: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let p = d.join(FICHIER);
+    let mut f = std::fs::OpenOptions::new().append(true).open(&p)?;
+    // One write per line: a line is whole or absent (a torn one is dropped at the next start).
+    f.write_all(format!("{ligne}\n").as_bytes())?;
+    f.sync_data()?;
+    let taille = f.metadata()?.len() as usize;
+    drop(f);
+    if taille > MAX_OCTETS {
+        recreer(d, &lire(&p))?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+mod service {
+    use super::*;
+    use crate::informatech_rotation::{commande_ok, fiable, poser_dacl};
+    use hbb_common::rand::{rngs::OsRng, RngCore};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    enum Message {
+        Debut { conn_id: i32, t: u64, genre: &'static str, pair: String, nom: String, ip: String },
+        Fin { conn_id: i32, t: u64 },
+    }
+
+    /// The session's side only does `try_send` on this bounded queue: full or absent, the message is dropped.
+    static FILE: OnceLock<SyncSender<Message>> = OnceLock::new();
+    const ATTENTE: usize = 256;
+    /// After a failure the folder is looked at again at most this often, and only when a connection needs it.
+    const NOUVEL_ESSAI: Duration = Duration::from_secs(600);
+
+    fn dossier() -> PathBuf {
+        let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        base.join("InformaTech").join(DOSSIER)
+    }
+
+    fn maintenant() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    }
+
+    /// Fixed event names only: never a peer's text. Called at most once per failure, never per connection.
+    fn journal(evenement: &'static str) {
+        hbb_common::log::warn!("informatech journal: {evenement}");
+    }
+
+    fn niveau(p: &Path) -> Niveau {
+        match std::fs::symlink_metadata(p) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Niveau::Absent,
+            Ok(_) if fiable(p) => Niveau::Fiable,
+            _ => Niveau::Douteux,
+        }
+    }
+
+    /// True when the log is ready to be appended to. Order (Scylla 17/11): the trust check FIRST, on the three
+    /// levels; an untrusted one ends here with nothing touched. Then only: create what is missing (`create_dir`
+    /// fails if the name appeared meanwhile), check again that what was created is ours, and only then set the DACL
+    /// (icacls on a path that has just passed the check, `/L`) and the owner. No takeown: a folder that needs one is
+    /// not trusted, hence skipped.
+    fn preparer(d: &Path) -> bool {
+        use std::ffi::OsStr;
+        let Some(parent) = d.parent() else {
+            return false;
+        };
+        let p = d.join(FICHIER);
+        let Plan::Ecrire { creer_parent, creer_dossier } = plan(niveau(parent), niveau(d), niveau(&p)) else {
+            return false;
+        };
+        if creer_parent && (std::fs::create_dir(parent).is_err() || !fiable(parent) || poser_dacl(parent, false).is_err()) {
+            return false;
+        }
+        if creer_dossier && std::fs::create_dir(d).is_err() {
+            return false;
+        }
+        if !fiable(d)
+            || poser_dacl(d, true).is_err()
+            || !commande_ok("icacls.exe", &[d.as_os_str(), OsStr::new("/setowner"), OsStr::new("*S-1-5-18"), OsStr::new("/L")])
+            || !fiable(d)
+        {
+            return false;
+        }
+        let ancien = if creer_dossier { Vec::new() } else { lire(&p) };
+        recreer(d, &ancien).is_ok() && fiable(&p)
+    }
+
+    fn boucle(rx: Receiver<Message>) {
+        let d = dossier();
+        let mut ouvertes: HashMap<i32, String> = HashMap::new();
+        let mut pret = preparer(&d);
+        let mut dernier_essai = Instant::now();
+        if !pret {
+            journal("connections are not logged: the log folder is not trusted or cannot be prepared");
+        }
+        while let Ok(message) = rx.recv() {
+            let ligne = match message {
+                Message::Debut { conn_id, t, genre, pair, nom, ip } => {
+                    let mut octets = [0u8; 8];
+                    OsRng.fill_bytes(&mut octets);
+                    let id = hex::encode(octets);
+                    let ligne = ligne_debut(&id, t, genre, &pair, &nom, &ip, !crate::platform::is_prelogin());
+                    ouvertes.insert(conn_id, id);
+                    ligne
+                }
+                Message::Fin { conn_id, t } => match ouvertes.remove(&conn_id) {
+                    Some(id) => ligne_fin(&id, t),
+                    None => continue,
+                },
+            };
+            if !pret && dernier_essai.elapsed() >= NOUVEL_ESSAI {
+                pret = preparer(&d);
+                dernier_essai = Instant::now();
+            }
+            if !pret || ligne.is_empty() {
+                continue;
+            }
+            // Looked at again before every write: an untrusted level means skip, never repair.
+            if !(fiable(&d) && fiable(&d.join(FICHIER))) || ajouter(&d, &ligne).is_err() {
+                pret = false;
+                dernier_essai = Instant::now();
+                journal("connections are not logged: the log is not trusted or cannot be written");
+            }
+        }
+    }
+
+    /// Started once in the `--server` process: the writer thread (it runs icacls, away from any session).
+    pub fn demarrer() {
+        let (tx, rx) = sync_channel(ATTENTE);
+        if FILE.set(tx).is_ok() {
+            std::thread::spawn(move || boucle(rx));
+        }
+    }
+
+    /// An authorized connection has just opened. Never blocks.
+    pub fn debut(conn_id: i32, conn_type: &str, pair: &str, nom: &str, ip: &str) {
+        if let Some(tx) = FILE.get() {
+            let _ = tx.try_send(Message::Debut { conn_id, t: maintenant(), genre: genre(conn_type), pair: nettoyer(pair), nom: nettoyer(nom), ip: nettoyer(ip) });
+        }
+    }
+
+    /// That connection has closed. Never blocks.
+    pub fn fin(conn_id: i32) {
+        if let Some(tx) = FILE.get() {
+            let _ = tx.try_send(Message::Fin { conn_id, t: maintenant() });
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use service::{debut, demarrer, fin};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ID: &str = "0123456789abcdef";
+
+    fn dossier_d_essai(nom: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("informatech-journal-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn lines_have_the_agreed_shape() {
+        let l = ligne_debut(ID, 1_763_340_000, genre("remote"), "123 456 789", "PC-ATELIER", "203.0.113.7", false);
+        let v: serde_json::Value = serde_json::from_str(&l).unwrap();
+        let attendu = serde_json::json!({"v": 1, "evt": "debut", "id": ID, "t": 1_763_340_000u64, "type": "controle",
+            "pair": "123 456 789", "nom": "PC-ATELIER", "ip": "203.0.113.7", "sessionOuverte": false});
+        assert_eq!(v, attendu);
+        assert!(!l.contains('\n'));
+        // No address known: null, not an empty string.
+        let sans_ip: serde_json::Value = serde_json::from_str(&ligne_debut(ID, 1, "controle", "p", "n", "", true)).unwrap();
+        assert!(sans_ip["ip"].is_null());
+        assert_eq!(sans_ip["sessionOuverte"], true);
+        let fin: serde_json::Value = serde_json::from_str(&ligne_fin(ID, 2)).unwrap();
+        assert_eq!(fin, serde_json::json!({"v": 1, "evt": "fin", "id": ID, "t": 2}));
+        // Both are lines the module accepts back.
+        assert!(ligne_valide(l.as_bytes()) && ligne_valide(ligne_fin(ID, 2).as_bytes()));
+        for (t, g) in [("remote", "controle"), ("file_transfer", "fichiers"), ("port_forward", "tunnel"), ("view_camera", "camera"), ("terminal", "terminal")] {
+            assert_eq!(genre(t), g);
+        }
+    }
+
+    #[test]
+    fn peer_text_is_bounded_and_cannot_break_a_line() {
+        let nom = format!("a\nb\r\u{0}\u{1b}[31m{}", "é".repeat(200));
+        let l = ligne_debut(ID, 1, "controle", "p\n{\"v\":1}", &nom, "1.2.3.4\n", true);
+        assert!(!l.contains('\n') && !l.contains('\r'));
+        let v: serde_json::Value = serde_json::from_str(&l).unwrap();
+        assert_eq!(v["nom"].as_str().unwrap().chars().count(), 64);
+        assert!(v["nom"].as_str().unwrap().starts_with("ab[31m"));
+        assert_eq!(v["pair"], "p{\"v\":1}");
+        assert_eq!(v["ip"], "1.2.3.4");
+        // The longest line the module can write still passes its own check.
+        let long = ligne_debut(ID, u64::MAX, "controle", &"\"".repeat(64), &"\\".repeat(64), &"\"".repeat(64), true);
+        assert!(long.len() <= MAX_LIGNE && ligne_valide(long.as_bytes()));
+    }
+
+    #[test]
+    fn only_our_own_lines_are_kept() {
+        let bonne = ligne_fin(ID, 5);
+        for mauvaise in [
+            "", "pas du json", "[1]", "{\"v\":2,\"evt\":\"fin\",\"id\":\"0123456789abcdef\",\"t\":1}",
+            "{\"v\":1,\"evt\":\"autre\",\"id\":\"0123456789abcdef\",\"t\":1}", "{\"v\":1,\"evt\":\"fin\",\"id\":\"0123\",\"t\":1}",
+            "{\"v\":1,\"evt\":\"fin\",\"id\":\"0123456789abcdeg\",\"t\":1}", "{\"v\":1,\"evt\":\"fin\",\"id\":\"0123456789abcdef\",\"t\":-1}",
+            "{\"v\":1,\"evt\":\"fin\",\"id\":\"0123456789abcdef\"",
+        ] {
+            assert!(!ligne_valide(mauvaise.as_bytes()), "{mauvaise}");
+        }
+        let trop_longue = format!("{{\"v\":1,\"evt\":\"fin\",\"id\":\"{ID}\",\"t\":1,\"x\":\"{}\"}}", "a".repeat(MAX_LIGNE));
+        assert!(!ligne_valide(trop_longue.as_bytes()));
+        // A torn last line, a stranger's text and invalid UTF-8 go; the valid lines stay byte for byte, in order.
+        let mut contenu = format!("{bonne}\nintrus\n{}\n", ligne_debut(ID, 6, "controle", "p", "n", "", true)).into_bytes();
+        contenu.extend_from_slice(b"\xff\xfe\n{\"v\":1,\"evt\":\"fin\",\"id\":\"0123");
+        let garde = garder(&contenu);
+        assert_eq!(garde, format!("{bonne}\n{}\n", ligne_debut(ID, 6, "controle", "p", "n", "", true)).into_bytes());
+        assert!(garder(b"").is_empty());
+    }
+
+    #[test]
+    fn above_the_cap_only_the_most_recent_lines_stay() {
+        let ligne = |i: usize| ligne_debut(&format!("{i:016x}"), i as u64, "controle", &"p".repeat(32), &"n".repeat(32), "203.0.113.7", true);
+        let n = MAX_OCTETS / ligne(0).len() + 50;
+        let contenu: String = (0..n).map(|i| ligne(i) + "\n").collect();
+        assert!(contenu.len() > MAX_OCTETS);
+        let garde = garder(contenu.as_bytes());
+        let lignes: Vec<&str> = std::str::from_utf8(&garde).unwrap().lines().collect();
+        assert_eq!(lignes.len(), LIGNES_GARDEES);
+        assert!(garde.len() <= MAX_OCTETS / 2);
+        // The most recent ones, unchanged and in order.
+        assert_eq!(lignes[LIGNES_GARDEES - 1], ligne(n - 1));
+        assert_eq!(lignes[0], ligne(n - LIGNES_GARDEES));
+        // Under the cap nothing is dropped.
+        let petit: String = (0..600).map(|i| ligne_fin(&format!("{i:016x}"), i as u64) + "\n").collect();
+        assert_eq!(garder(petit.as_bytes()), petit.as_bytes());
+    }
+
+    /// Scylla 17/11: an untrusted level (a reparse point, a folder a user owns: `Douteux`, told by
+    /// informatech_rotation::digne_de_confiance, tested there) means nothing is touched.
+    #[test]
+    fn an_untrusted_level_means_do_nothing() {
+        use Niveau::*;
+        for a in [Absent, Fiable, Douteux] {
+            for b in [Absent, Fiable, Douteux] {
+                assert_eq!(plan(Douteux, a, b), Plan::Passer, "parent");
+                assert_eq!(plan(a, Douteux, b), Plan::Passer, "folder pre-created by a user, or a junction");
+                assert_eq!(plan(a, b, Douteux), Plan::Passer, "file planted under the log's name");
+            }
+        }
+        // The service creates only what is missing.
+        assert_eq!(plan(Absent, Absent, Absent), Plan::Ecrire { creer_parent: true, creer_dossier: true });
+        assert_eq!(plan(Fiable, Absent, Absent), Plan::Ecrire { creer_parent: false, creer_dossier: true });
+        assert_eq!(plan(Fiable, Fiable, Absent), Plan::Ecrire { creer_parent: false, creer_dossier: false });
+        assert_eq!(plan(Fiable, Fiable, Fiable), Plan::Ecrire { creer_parent: false, creer_dossier: false });
+        // Something under a level that does not exist: not a state to act on.
+        assert_eq!(plan(Absent, Fiable, Absent), Plan::Passer);
+        assert_eq!(plan(Fiable, Absent, Fiable), Plan::Passer);
+    }
+
+    #[test]
+    fn the_log_is_recreated_without_touching_anything_else() {
+        let d = dossier_d_essai("recreer");
+        std::fs::write(d.join(FICHIER), format!("intrus\n{}\n{{\"v\":1,\"evt\":\"fin\",\"id\"", ligne_fin(ID, 1))).unwrap();
+        std::fs::write(d.join("autre.txt"), "x").unwrap();
+        std::fs::create_dir_all(d.join("sous-dossier").join("x")).unwrap();
+        // A leftover of an interrupted trim is the one thing this module deletes.
+        std::fs::write(d.join(TEMPORAIRE), "reste d'un arrêt").unwrap();
+        recreer(&d, &lire(&d.join(FICHIER))).unwrap();
+        // Its valid lines stay, byte for byte; the neighbours are still there.
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), format!("{}\n", ligne_fin(ID, 1)));
+        assert_eq!(std::fs::read_to_string(d.join("autre.txt")).unwrap(), "x");
+        assert!(d.join("sous-dossier").join("x").is_dir());
+        assert!(!d.join(TEMPORAIRE).exists());
+        ajouter(&d, &ligne_fin(ID, 2)).unwrap();
+        ajouter(&d, &ligne_fin(ID, 3)).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), format!("{}\n{}\n{}\n", ligne_fin(ID, 1), ligne_fin(ID, 2), ligne_fin(ID, 3)));
+        // The temporary name taken by a folder: refused, the folder and its content are left alone, the log unchanged.
+        std::fs::create_dir_all(d.join(TEMPORAIRE).join("garde")).unwrap();
+        assert!(recreer(&d, b"").is_err());
+        assert!(d.join(TEMPORAIRE).join("garde").is_dir());
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap().lines().count(), 3);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn appending_never_creates_the_file_and_trims_past_the_cap() {
+        let d = dossier_d_essai("ajouter");
+        assert!(ajouter(&d, &ligne_fin(ID, 1)).is_err());
+        assert!(!d.join(FICHIER).exists());
+        recreer(&d, &[]).unwrap();
+        let ligne = |i: usize| ligne_debut(&format!("{i:016x}"), i as u64, "controle", &"p".repeat(32), &"n".repeat(32), "203.0.113.7", true);
+        let n = MAX_OCTETS / (ligne(0).len() + 1);
+        let presque: String = (0..n).map(|i| ligne(i) + "\n").collect();
+        std::fs::write(d.join(FICHIER), &presque).unwrap();
+        ajouter(&d, &ligne(n)).unwrap();
+        let apres = std::fs::read_to_string(d.join(FICHIER)).unwrap();
+        assert!(apres.len() <= MAX_OCTETS / 2);
+        assert_eq!(apres.lines().count(), LIGNES_GARDEES);
+        assert_eq!(apres.lines().last().unwrap(), ligne(n));
+        // A log far bigger than anything this module writes is not read back.
+        std::fs::write(d.join(FICHIER), vec![b'a'; 4 * MAX_OCTETS + 1]).unwrap();
+        assert!(lire(&d.join(FICHIER)).is_empty());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+}

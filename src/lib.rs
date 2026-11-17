@@ -11,6 +11,9 @@ pub use platform::{
 /// InformaTech (A12): the service rotates its permanent password after each session.
 #[cfg(windows)]
 pub mod informatech_rotation;
+/// InformaTech (S-076 C): the service logs every authorized incoming connection for the client's Hub. Compiled
+/// everywhere (its file format is tested on any host); it only runs in the Windows service.
+mod informatech_journal;
 #[cfg(not(any(target_os = "ios")))]
 /// cbindgen:ignore
 mod server;

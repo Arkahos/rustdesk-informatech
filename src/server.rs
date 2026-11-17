@@ -674,6 +674,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         // InformaTech (A12): rotation of the permanent password, driven by this process's authorized connections.
         #[cfg(windows)]
         crate::informatech_rotation::demarrer(informatech_nb_connexions_autorisees);
+        // InformaTech (S-076 C): the connection log's folder is closed and its file re-created before any connection.
+        #[cfg(windows)]
+        crate::informatech_journal::demarrer();
         std::thread::spawn(move || {
             if let Err(err) = crate::ipc::start("") {
                 log::error!("Failed to start ipc: {}", err);
