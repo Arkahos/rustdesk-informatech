@@ -224,7 +224,7 @@ pub(crate) fn systeme32(programme: &str) -> Option<PathBuf> {
     Some(PathBuf::from(std::ffi::OsString::from_wide(&tampon[..n])).join(programme))
 }
 
-/// Runs `takeown.exe` or `icacls.exe` (file name with its extension) from System32.
+/// Runs a Windows tool (`icacls.exe`: file name with its extension) from System32.
 pub(crate) fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
     let Some(exe) = systeme32(programme) else {
         return false;

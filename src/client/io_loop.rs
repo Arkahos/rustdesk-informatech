@@ -2361,9 +2361,17 @@ impl<T: InvokeUiSession> Remote<T> {
                     self.handler.set_platform_additions(&pi.platform_additions);
                 }
                 Some(message::Union::ScreenshotResponse(response)) => {
-                    crate::client::screenshot::set_screenshot(response.data);
-                    self.handler
-                        .handle_screenshot_resp(response.sid, response.msg);
+                    // InformaTech (Styx 16/11, Scylla 17/11 point 7): this build never asks for a screenshot, so one
+                    // that arrives anyway (sent by the peer unasked) is dropped: never cached, never offered to
+                    // « Save as » or « Copy ».
+                    if crate::common::INFORMATECH_SANS_CAPTURE {
+                        // trace only: the peer decides how often this happens (AGENTS.md, logging rule).
+                        hbb_common::log::trace!("informatech: unsolicited screenshot dropped");
+                    } else {
+                        crate::client::screenshot::set_screenshot(response.data);
+                        self.handler
+                            .handle_screenshot_resp(response.sid, response.msg);
+                    }
                 }
                 Some(message::Union::TerminalResponse(response)) => {
                     use base::message_proto::terminal_response::Union;

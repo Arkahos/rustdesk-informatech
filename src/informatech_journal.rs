@@ -120,9 +120,17 @@ pub(crate) fn genre(conn_type: &str) -> &'static str {
     }
 }
 
-/// What the peer announces about itself is its own text: no control character, 64 characters at most.
+/// What the peer announces about itself is its own text: no control character, no bidirectional or invisible
+/// formatting character (Scylla 17/11: a right-to-left override can make a reader show « gpj.exe » as « exe.jpg »),
+/// 64 characters at most.
 pub(crate) fn nettoyer(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).take(MAX_TEXTE).collect()
+    s.chars().filter(|c| !c.is_control() && !format_invisible(*c)).take(MAX_TEXTE).collect()
+}
+
+/// Bidirectional controls and zero-width formatting characters: the Unicode format characters that change how the
+/// text around them reads.
+fn format_invisible(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}')
 }
 
 pub(crate) fn ligne_debut(id: &str, t: u64, genre: &'static str, pair: &str, nom: &str, ip: &str, session_ouverte: bool) -> String {
@@ -510,6 +518,15 @@ mod tests {
         for (t, g) in [("remote", "controle"), ("file_transfer", "fichiers"), ("port_forward", "tunnel"), ("view_camera", "camera"), ("terminal", "terminal")] {
             assert_eq!(genre(t), g);
         }
+    }
+
+    #[test]
+    fn peer_text_has_no_bidi_or_invisible_formatting() {
+        // Scylla 17/11: right-to-left override, isolates, marks, zero-width characters and the BOM go.
+        let nom = "PC\u{202E}exe.jpg\u{2066}x\u{2069}\u{200B}\u{200F}\u{061C}\u{FEFF}\u{2060}y";
+        assert_eq!(nettoyer(nom), "PCexe.jpgxy");
+        // Ordinary accents, other scripts and emoji stay.
+        assert_eq!(nettoyer("Poste d’Élodie · 王 🙂"), "Poste d’Élodie · 王 🙂");
     }
 
     #[test]
