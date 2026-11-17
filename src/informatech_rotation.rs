@@ -19,7 +19,8 @@
 //!   the next trigger; 429/5xx/network kept, same value retried every 5 minutes, at most 24 hours.
 //! - Logs carry fixed event names only (`journal` takes `&'static str`): never the token, the URL or a password.
 //! - Visible when off (Scylla 17/11, like the connection log): `HKLM\SOFTWARE\InformaTech\OPMD-rotation`, `etat` =
-//!   `actif` | `hors-service` and `t` (seconds since 1970 UTC), written by the service at start and on every change.
+//!   `actif` | `hors-service` and `t` (seconds since 1970 UTC), written by the service at start and on every change
+//!   (a failed write is tried again every 15 s).
 //!   `hors-service` = rotation cannot run on this PC (a level not trusted, the state file unreadable): exactly the
 //!   cases where `--informatech-rotation` exits 3, so a refusal is never silent. No key = not configured (nothing on
 //!   disk, or cleared), an older engine, or a service that never started. The decision is `publication` (pure).
@@ -171,6 +172,41 @@ pub(crate) fn publication(niveaux: Option<(Niveau, Niveau, Niveau)>, lisible: bo
         Plan::Ecrire { .. } if fichier == Niveau::Absent => Publication::NonConfiguree,
         Plan::Ecrire { .. } if lisible => Publication::Actif,
         Plan::Ecrire { .. } => Publication::HorsService,
+    }
+}
+
+/// The publication's side of the service loop (Argos P4 on 8cc5f198): `publie` is what the key says, so a failed
+/// write is tried again at every turn (15 s) until it lands, and a refusal never stays silent behind an absent key;
+/// the log gets one line per change of state (and one for a failed write of it), never one per turn. Pure: `ecrire`
+/// is the registry write.
+#[derive(Debug, Default)]
+pub(crate) struct Publieur {
+    publie: Option<Publication>,
+    journalise: Option<Publication>,
+}
+
+impl Publieur {
+    /// One turn: the fixed log lines to write (never a secret, never a path).
+    pub(crate) fn pas(&mut self, p: Publication, ecrire: impl FnOnce(Publication) -> bool) -> Vec<&'static str> {
+        let mut lignes = Vec::new();
+        let nouveau = self.journalise != Some(p);
+        if nouveau {
+            lignes.push(match p {
+                Publication::HorsService => "rotation off on this PC: a state folder is not trusted, or the state cannot be read",
+                Publication::Actif => "rotation on",
+                Publication::NonConfiguree => "rotation not configured",
+            });
+            self.journalise = Some(p);
+        }
+        if self.publie == Some(p) {
+            return lignes;
+        }
+        if ecrire(p) {
+            self.publie = Some(p);
+        } else if nouveau {
+            lignes.push("the state of the rotation could not be published: tried again every 15 s");
+        }
+        lignes
     }
 }
 
@@ -397,11 +433,11 @@ fn regarder() -> (Option<(Niveau, Niveau, Niveau)>, Option<Etat>) {
     (Some(niveaux), etat)
 }
 
-/// Publishes the state for the client's Hub, at start and on a change only. Same rights as the connection log's key
+/// Writes the state for the client's Hub; true when the key now says it. Same rights as the connection log's key
 /// (informatech_journal.rs): created by this SYSTEM service under HKLM\SOFTWARE, inherited rights, so a standard user
 /// reads it and cannot forge « actif ». Not configured: the key is removed.
 #[cfg(windows)]
-fn publier(p: Publication) {
+fn ecrire_cle(p: Publication) -> bool {
     use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let ecrit = match mot_publie(p) {
@@ -414,14 +450,7 @@ fn publier(p: Publication) {
             r => r,
         },
     };
-    if ecrit.is_err() {
-        journal("the state of the rotation could not be published");
-    }
-    journal(match p {
-        Publication::HorsService => "rotation off on this PC: a state folder is not trusted, or the state cannot be read",
-        Publication::Actif => "rotation on",
-        Publication::NonConfiguree => "rotation not configured",
-    });
+    ecrit.is_ok()
 }
 
 #[cfg(windows)]
@@ -598,7 +627,7 @@ pub fn demarrer(nb_connexions: fn() -> usize) {
         let mut demarrage = true;
         let mut avant = nb_connexions();
         let mut fin_derniere: Option<u64> = None;
-        let mut publie: Option<Publication> = None;
+        let mut publieur = Publieur::default();
         loop {
             let n = nb_connexions();
             let t = maintenant();
@@ -610,9 +639,8 @@ pub fn demarrer(nb_connexions: fn() -> usize) {
             avant = n;
             let (niveaux, lu) = regarder();
             let p = publication(niveaux, lu.is_some());
-            if publie != Some(p) {
-                publier(p);
-                publie = Some(p);
+            for ligne in publieur.pas(p, ecrire_cle) {
+                journal(ligne);
             }
             if let Some(e) = lu {
                 let action = decider(&e, n, fin_derniere, t, demarrage);
@@ -828,6 +856,28 @@ mod tests {
         assert_eq!(publication(Some((Absent, Absent, Absent)), false), Publication::NonConfiguree);
         assert_eq!(publication(Some((Fiable, Absent, Absent)), false), Publication::NonConfiguree);
         assert_eq!(publication(Some((Fiable, Fiable, Absent)), false), Publication::NonConfiguree);
+    }
+
+    /// Argos P4 on 8cc5f198: a failed write is tried again every turn until it lands; the log says each change once.
+    #[test]
+    fn une_ecriture_ratee_est_retentee_sans_inonder_le_journal() {
+        use Publication::*;
+        let mut p = Publieur::default();
+        let mut essais = 0;
+        // The first write of « hors-service » fails twice, then lands.
+        let l1 = p.pas(HorsService, |_| { essais += 1; false });
+        assert_eq!(l1.len(), 2, "the change and the failure, once: {l1:?}");
+        assert!(p.pas(HorsService, |_| { essais += 1; false }).is_empty(), "tried again, nothing logged");
+        assert!(p.pas(HorsService, |_| { essais += 1; true }).is_empty());
+        assert_eq!(essais, 3, "tried at every turn until it landed");
+        // Written: no more writes while the state stays.
+        assert!(p.pas(HorsService, |_| panic!("no write once the key says it")).is_empty());
+        // A change logs one line and writes once.
+        assert_eq!(p.pas(Actif, |_| true), vec!["rotation on"]);
+        assert!(p.pas(Actif, |_| panic!("no write")).is_empty());
+        // A change whose write fails, then back to what the key still says: nothing left to write.
+        assert_eq!(p.pas(NonConfiguree, |_| false).len(), 2);
+        assert_eq!(p.pas(Actif, |_| panic!("the key still says actif")), vec!["rotation on"], "logged, not written");
     }
 
     /// The key and the words the Hub reads (Zoro), pinned.
