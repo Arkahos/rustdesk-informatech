@@ -130,7 +130,9 @@ pub(crate) fn nettoyer(s: &str) -> String {
 /// Every Unicode format character (general category Cf, Scylla 18/11: bidirectional controls, zero-width characters,
 /// the soft hyphen, the tag characters U+E0000-E007F that can spell hidden text, …), the Mongolian vowel separator,
 /// and the line and paragraph separators (Argos P4: not `is_control`, yet a reader may break the line there). The
-/// list is Unicode 15's Cf, written out (std has no general category); the tag block is taken whole.
+/// list is Unicode 15's Cf, written out (std has no general category); the tag block is taken whole. Also the
+/// invisible characters outside Cf that Scylla named: the combining grapheme joiner U+034F, the variation selectors
+/// (U+FE00-FE0F, U+E0100-E01EF) and the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0).
 fn format_invisible(c: char) -> bool {
     matches!(
         c,
@@ -154,6 +156,12 @@ fn format_invisible(c: char) -> bool {
             | '\u{1BCA0}'..='\u{1BCA3}'
             | '\u{1D173}'..='\u{1D17A}'
             | '\u{E0000}'..='\u{E007F}'
+            | '\u{034F}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FFA0}'
+            | '\u{E0100}'..='\u{E01EF}'
     )
 }
 
@@ -545,6 +553,8 @@ mod tests {
         assert_eq!(nettoyer("a\u{2028}b\u{2029}c\u{00AD}d\u{180E}e"), "abcde");
         // Scylla 18/11: the whole Cf category, tag characters (hidden text) included.
         assert_eq!(nettoyer("x\u{E0001}\u{E0068}\u{E0069}\u{E007F}\u{0600}\u{06DD}\u{2064}\u{13430}\u{1D173}y"), "xy");
+        // Outside Cf but invisible (Scylla 18/11): grapheme joiner, variation selectors, Hangul fillers.
+        assert_eq!(nettoyer("x\u{034F}\u{FE0F}\u{FE00}\u{E0100}\u{E01EF}\u{115F}\u{1160}\u{3164}\u{FFA0}y"), "xy");
         // Ordinary accents, other scripts and emoji stay.
         assert_eq!(nettoyer("Poste d’Élodie · 王 🙂"), "Poste d’Élodie · 王 🙂");
     }
