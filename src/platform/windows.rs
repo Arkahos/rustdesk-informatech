@@ -2786,6 +2786,52 @@ pub fn send_message_to_hnwd(
     return true;
 }
 
+/// InformaTech (S-078, Scylla 17/11): where the link of `--connect <id> --password-stdin` went.
+pub enum InformatechEnvoi {
+    /// Handed to a window of this very program.
+    Envoye,
+    /// No window of that class and name: this process opens its own.
+    PasDeFenetre,
+    /// A window of that class and name belongs to another program (or to a process whose image path cannot be read):
+    /// nothing was sent.
+    Etrangere,
+}
+
+/// Like `send_message_to_hnwd`, for a link that carries the password. The window is found by class and title, which
+/// any process can take (a low-integrity one included: a message may go down the integrity levels), so the process
+/// that owns it must run this very executable (full image paths, canonical, compared by
+/// `informatech_meme_programme`); otherwise nothing is sent. The data is never logged.
+pub fn informatech_envoyer_a_notre_fenetre(class_name: &str, window_name: &str, dw_data: usize, data: &str) -> InformatechEnvoi {
+    let class_name_utf16 = wide_string(class_name);
+    let window_name_utf16 = wide_string(window_name);
+    // SAFETY: two NUL-terminated UTF-16 buffers that live through the call.
+    let window = unsafe { FindWindowW(class_name_utf16.as_ptr(), window_name_utf16.as_ptr()) };
+    if window.is_null() {
+        return InformatechEnvoi::PasDeFenetre;
+    }
+    let mut pid: DWORD = 0;
+    // SAFETY: `window` came from FindWindowW; `pid` is a local out-parameter.
+    unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    let canonique = |p: PathBuf| std::fs::canonicalize(p).ok();
+    let sien = if pid == 0 { None } else { get_process_executable_path(pid).ok().and_then(canonique) };
+    let notre = std::env::current_exe().ok().and_then(canonique);
+    let meme = match (sien, notre) {
+        (Some(a), Some(b)) => crate::common::informatech_meme_programme(&a.to_string_lossy(), &b.to_string_lossy()),
+        _ => false,
+    };
+    if !meme {
+        return InformatechEnvoi::Etrangere;
+    }
+    let mut data_struct = COPYDATASTRUCT::default();
+    data_struct.dwData = dw_data;
+    let mut data_zero: String = data.chars().chain(Some('\0').into_iter()).collect();
+    data_struct.cbData = data_zero.len() as _;
+    data_struct.lpData = data_zero.as_mut_ptr() as _;
+    // SAFETY: `data_struct` and the buffer it points to live through this synchronous call.
+    unsafe { SendMessageW(window, WM_COPYDATA, 0, &data_struct as *const COPYDATASTRUCT as _) };
+    InformatechEnvoi::Envoye
+}
+
 pub fn get_logon_user_token(user: &str, pwd: &str) -> ResultType<HANDLE> {
     let user_split = user.split("\\").collect::<Vec<&str>>();
     let wuser = wide_string(user_split.get(1).unwrap_or(&user));

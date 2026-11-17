@@ -164,11 +164,17 @@ pub(crate) fn garder(contenu: &[u8], maintenant: u64) -> Vec<u8> {
     sortie
 }
 
-/// What an existing log holds, or nothing when it is far too big to be ours.
-pub(crate) fn lire(p: &Path) -> Vec<u8> {
+/// What an existing log holds; empty when there is no log yet. Scylla 17/11: a log that cannot be read (locked,
+/// an I/O error) or that is far too big to be ours is an ERROR, never an empty content: the caller then does not
+/// re-create the file (that would empty the client's record) and logs nothing until the next try.
+pub(crate) fn lire(p: &Path) -> std::io::Result<Vec<u8>> {
     match std::fs::metadata(p) {
-        Ok(m) if m.len() as usize <= 4 * MAX_OCTETS => std::fs::read(p).unwrap_or_default(),
-        _ => Vec::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e),
+        Ok(m) if m.len() > (4 * MAX_OCTETS) as u64 => {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "log far bigger than this module writes"))
+        }
+        Ok(_) => std::fs::read(p),
     }
 }
 
@@ -202,9 +208,12 @@ pub(crate) fn plan(parent: Niveau, dossier: Niveau, fichier: Niveau) -> Plan {
     }
 }
 
-/// Re-creates the log of folder `d` from `ancien` (see `garder`): written to a brand-new temporary file, then renamed
-/// over the log. Nothing else in the folder is touched. The only thing deleted is this module's own temporary file,
-/// one file, never a folder and never recursively: if that name is anything else, this fails and nothing is logged.
+/// Re-creates the log of folder `d` from `ancien` (see `garder`): written to a brand-new temporary file in the same
+/// (trusted) folder, flushed to disk, then renamed over the log (Windows: MoveFileExW with REPLACE_EXISTING, one
+/// volume). A crash before the rename leaves the old log whole and a temporary file that the next call removes; a
+/// failed rename (the log held open without delete sharing) leaves the old log whole too. Nothing else in the folder
+/// is touched. The only thing deleted is this module's own temporary file, one file, never a folder and never
+/// recursively: if that name is anything else (a folder, a link), this fails and nothing is logged.
 pub(crate) fn recreer(d: &Path, ancien: &[u8], maintenant: u64) -> std::io::Result<()> {
     use std::io::Write;
     let tmp = d.join(TEMPORAIRE);
@@ -232,7 +241,7 @@ pub(crate) fn ajouter(d: &Path, ligne: &str, maintenant: u64) -> std::io::Result
     let taille = f.metadata()?.len() as usize;
     drop(f);
     if taille > MAX_OCTETS {
-        recreer(d, &lire(&p), maintenant)?;
+        recreer(d, &lire(&p)?, maintenant)?;
     }
     Ok(())
 }
@@ -268,6 +277,11 @@ mod service {
     const CLE_ETAT: &str = r"SOFTWARE\InformaTech\OPMD-journal";
 
     /// Publishes the state for the client's Hub. Called at start and when the state changes, never per connection.
+    /// Rights (Scylla 17/11): the key is created by this service, as SYSTEM, under HKLM\SOFTWARE (64-bit view: the
+    /// service is a 64-bit process) and takes that hive's inherited rights: SYSTEM and Administrators full,
+    /// BUILTIN\Users read only. A standard user can therefore read « hors-service » and cannot forge « actif ». The
+    /// parent `SOFTWARE\InformaTech` is the engine installer's (InstallState), created elevated, same inherited rights.
+    /// The Hub must read anything but these two words, a value of another type, or a `t` in the future as « inconnu ».
     fn publier(pret: bool) {
         use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
         let ecrit = RegKey::predef(HKEY_LOCAL_MACHINE).create_subkey(CLE_ETAT).and_then(|(cle, _)| {
@@ -323,7 +337,10 @@ mod service {
         {
             return false;
         }
-        let ancien = if creer_dossier { Vec::new() } else { lire(&p) };
+        // Unreadable: nothing re-created, nothing logged, state « hors-service » (never an emptied log).
+        let Ok(ancien) = (if creer_dossier { Ok(Vec::new()) } else { lire(&p) }) else {
+            return false;
+        };
         recreer(d, &ancien, maintenant()).is_ok() && fiable(&p)
     }
 
@@ -502,9 +519,9 @@ mod tests {
         let d = dossier_d_essai("un-an");
         recreer(&d, contenu.as_bytes(), 0).unwrap();
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), contenu);
-        recreer(&d, &lire(&d.join(FICHIER)), maintenant).unwrap();
+        recreer(&d, &lire(&d.join(FICHIER)).unwrap(), maintenant).unwrap();
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), garde);
-        recreer(&d, &lire(&d.join(FICHIER)), maintenant + 2 * AN + 1).unwrap();
+        recreer(&d, &lire(&d.join(FICHIER)).unwrap(), maintenant + 2 * AN + 1).unwrap();
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), "");
         std::fs::remove_dir_all(&d).unwrap();
     }
@@ -569,7 +586,7 @@ mod tests {
         std::fs::create_dir_all(d.join("sous-dossier").join("x")).unwrap();
         // A leftover of an interrupted trim is the one thing this module deletes.
         std::fs::write(d.join(TEMPORAIRE), "reste d'un arrêt").unwrap();
-        recreer(&d, &lire(&d.join(FICHIER)), 0).unwrap();
+        recreer(&d, &lire(&d.join(FICHIER)).unwrap(), 0).unwrap();
         // Its valid lines stay, byte for byte; the neighbours are still there.
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), format!("{}\n", ligne_fin(ID, 1)));
         assert_eq!(std::fs::read_to_string(d.join("autre.txt")).unwrap(), "x");
@@ -601,9 +618,36 @@ mod tests {
         assert!(apres.len() <= MAX_OCTETS / 2);
         assert_eq!(apres.lines().count(), LIGNES_GARDEES);
         assert_eq!(apres.lines().last().unwrap(), ligne(n));
-        // A log far bigger than anything this module writes is not read back.
+        // A log far bigger than anything this module writes is not read back: an error, never an empty content.
         std::fs::write(d.join(FICHIER), vec![b'a'; 4 * MAX_OCTETS + 1]).unwrap();
-        assert!(lire(&d.join(FICHIER)).is_empty());
+        assert_eq!(lire(&d.join(FICHIER)).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        // ... and appending to it does not empty it either: the append fails before any re-creation.
+        let avant = std::fs::metadata(d.join(FICHIER)).unwrap().len();
+        assert!(ajouter(&d, &ligne_fin(ID, 9), 0).is_err());
+        assert_eq!(std::fs::metadata(d.join(FICHIER)).unwrap().len(), avant + ligne_fin(ID, 9).len() as u64 + 1);
+        // No log yet: an empty content, not an error.
+        assert!(lire(&d.join("absent.jsonl")).unwrap().is_empty());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Scylla 17/11: re-creating never loses the log. A leftover temporary file (a crash before the rename) is
+    /// removed and the log is whole; a log that cannot be read is never replaced.
+    #[test]
+    fn re_creating_never_loses_the_log() {
+        let d = dossier_d_essai("sans-perte");
+        let lignes = format!("{}\n{}\n", ligne_fin(ID, 1), ligne_fin(ID, 2));
+        std::fs::write(d.join(FICHIER), &lignes).unwrap();
+        // A crash after the temporary file was written, before the rename: the log is untouched.
+        std::fs::write(d.join(TEMPORAIRE), "moitié d'une copie").unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), lignes);
+        // The next re-creation removes the leftover and keeps every line.
+        recreer(&d, &lire(&d.join(FICHIER)).unwrap(), 0).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), lignes);
+        assert!(!d.join(TEMPORAIRE).exists());
+        // The temporary name is a link or a folder: refused, the log is untouched.
+        std::fs::create_dir(d.join(TEMPORAIRE)).unwrap();
+        assert!(recreer(&d, b"", 0).is_err());
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), lignes);
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

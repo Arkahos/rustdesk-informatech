@@ -2540,6 +2540,19 @@ pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
 /// file of unknown origin to the video parser).
 pub(crate) const INFORMATECH_REFUS_LECTURE: &str = "refused: this build records nothing and plays no recording";
 
+/// S-078 (Scylla 17/11): the window that would receive the password link is not one of this program's.
+pub(crate) const INFORMATECH_REFUS_FENETRE_ETRANGERE: &str =
+    "refused: a window of this name belongs to another program; nothing was sent";
+
+/// S-078 (Scylla 17/11): true when two canonical image paths name the same executable. Windows paths compare without
+/// case (ASCII and beyond, as NTFS does for these names); the `\\?\` prefix that `canonicalize` adds is ignored on both
+/// sides. An empty path is never ours. Pure, for the tests.
+pub(crate) fn informatech_meme_programme(a: &str, b: &str) -> bool {
+    let net = |p: &str| p.trim_start_matches(r"\\?\").to_lowercase();
+    let (a, b) = (net(a), net(b));
+    !a.is_empty() && a == b
+}
+
 /// What one of our links names, read more widely than any URL parser would (see `informatech_lire_lien`).
 struct InformatechLien {
     /// First path segment: the command (`connect`, `password`, `play`…) or a bare id.
@@ -3678,6 +3691,27 @@ mod tests {
         for a in accepte {
             assert_eq!(informatech_refus_au_demarrage(&ligne(a), p), None, "{a:?}");
         }
+    }
+
+    #[test]
+    fn informatech_s078_password_link_goes_only_to_this_very_program() {
+        let nous = r"\\?\C:\Program Files\InformaTech\InformaTech.exe";
+        for meme in [nous, r"C:\Program Files\InformaTech\InformaTech.exe", r"\\?\c:\program files\informatech\INFORMATECH.EXE"] {
+            assert!(informatech_meme_programme(meme, nous), "{meme}");
+        }
+        for autre in [
+            "",
+            r"\\?\",
+            r"\\?\C:\Users\x\AppData\Local\Temp\InformaTech.exe",
+            r"\\?\C:\Program Files\InformaTech\InformaTech.exe.bak",
+            r"\\?\C:\Program Files\InformaTech\Autre.exe",
+            r"\\?\D:\Program Files\InformaTech\InformaTech.exe",
+        ] {
+            assert!(!informatech_meme_programme(autre, nous), "{autre}");
+        }
+        assert!(!informatech_meme_programme("", ""));
+        // The refusal never names the link.
+        assert!(!INFORMATECH_REFUS_FENETRE_ETRANGERE.contains("password="));
     }
 
     #[test]

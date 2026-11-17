@@ -894,14 +894,23 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     #[cfg(windows)]
     {
         use winapi::um::winuser::WM_USER;
-        let res = crate::platform::send_message_to_hnwd(
+        // InformaTech (S-078, Scylla 17/11): the link may carry the password read from stdin: it goes only to a
+        // window of this very executable. A window of that name owned by anything else gets nothing, and this
+        // process ends (no window of its own either: the caller sees the refusal).
+        return match crate::platform::informatech_envoyer_a_notre_fenetre(
             &crate::platform::FLUTTER_RUNNER_WIN32_WINDOW_CLASS,
             &crate::get_app_name(),
             (WM_USER + 2) as _, // referred from unilinks desktop pub
             uni_links.as_str(),
-            false,
-        );
-        return if res { None } else { Some(Vec::new()) };
+        ) {
+            crate::platform::InformatechEnvoi::Envoye => None,
+            crate::platform::InformatechEnvoi::PasDeFenetre => Some(Vec::new()),
+            crate::platform::InformatechEnvoi::Etrangere => {
+                log::warn!("informatech: a window of our name belongs to another program, the link was not sent");
+                println!("{}", crate::common::INFORMATECH_REFUS_FENETRE_ETRANGERE);
+                std::process::exit(2);
+            }
+        };
     }
     #[cfg(target_os = "macos")]
     {
@@ -1010,7 +1019,7 @@ mod tests {
             "crate::platform::windows::bootstrap()",
             "for arg in std::env::args() {",
             "return core_main_invoke_new_connection(std::env::args());",
-            "crate::platform::send_message_to_hnwd(",
+            "crate::platform::informatech_envoyer_a_notre_fenetre(",
             "crate::ipc::send_url_scheme(uni_links)",
             "try_send_by_dbus(uni_links)",
         ] {
