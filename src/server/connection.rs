@@ -864,6 +864,9 @@ impl Connection {
                                 conn.restart = enabled;
                                 conn.send_permission(Permission::Restart, enabled).await;
                             } else if &name == "recording" {
+                                // InformaTech (A9-2): never recorded (INFORMATECH_SANS_CAPTURE), whatever the switch.
+                                let enabled =
+                                    crate::common::informatech_bascule_cm(keys::OPTION_ENABLE_RECORD_SESSION, enabled);
                                 conn.recording = enabled;
                                 conn.send_permission(Permission::Recording, enabled).await;
                             } else if &name == "block_input" {
@@ -3440,8 +3443,10 @@ impl Connection {
                     {
                         // One-way file transfer: never serve this side's clipboard files to the peer.
                     } else if let Some(clip) = msg_2_clip(clip) {
+                        // InformaTech (A9-2): on Windows the --cm process serves file copy and paste; with file
+                        // transfer refused the peer's clipboard files never reach it, whatever its switch says.
                         #[cfg(target_os = "windows")]
-                        {
+                        if !crate::common::informatech_permission_refusee(keys::OPTION_ENABLE_FILE_TRANSFER) {
                             self.send_to_cm(ipc::Data::ClipboardFile(clip));
                         }
                         #[cfg(feature = "unix-file-copy-paste")]

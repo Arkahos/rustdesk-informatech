@@ -406,6 +406,8 @@ pub fn send_chat(id: i32, text: String) {
 #[inline]
 #[cfg(not(any(target_os = "ios")))]
 pub fn switch_permission(id: i32, name: String, enabled: bool) {
+    // InformaTech (A9-2): a refused kind stays off, in the engine and in this process's own state.
+    let enabled = crate::common::informatech_bascule_cm_nom(&name, enabled);
     #[cfg(target_os = "android")]
     let is_keyboard_permission = name == "keyboard";
     #[cfg(not(target_os = "android"))]
@@ -431,6 +433,8 @@ pub fn switch_permission(id: i32, name: String, enabled: bool) {
 #[inline]
 #[cfg(target_os = "android")]
 pub fn switch_permission_all(name: String, enabled: bool) {
+    // InformaTech (A9-2): same as switch_permission.
+    let enabled = crate::common::informatech_bascule_cm_nom(&name, enabled);
     if name != "keyboard"
         && !option2bool(
             OPTION_ENABLE_PERM_CHANGE_IN_ACCEPT_WINDOW,

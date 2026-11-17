@@ -2815,6 +2815,29 @@ pub(crate) fn informatech_bascule_cm(option: &str, demande: bool) -> bool {
     demande && !informatech_permission_refusee(option)
 }
 
+/// The `enable-…` option behind a switch of the client's connection window (--cm), by the name the window sends.
+pub(crate) fn informatech_option_de_bascule(nom: &str) -> Option<&'static str> {
+    Some(match nom {
+        "keyboard" => keys::OPTION_ENABLE_KEYBOARD,
+        "clipboard" => keys::OPTION_ENABLE_CLIPBOARD,
+        "audio" => keys::OPTION_ENABLE_AUDIO,
+        "file" => keys::OPTION_ENABLE_FILE_TRANSFER,
+        "restart" => keys::OPTION_ENABLE_REMOTE_RESTART,
+        "recording" => keys::OPTION_ENABLE_RECORD_SESSION,
+        "block_input" => keys::OPTION_ENABLE_BLOCK_INPUT,
+        "privacy_mode" => keys::OPTION_ENABLE_PRIVACY_MODE,
+        _ => return None,
+    })
+}
+
+/// InformaTech (A9-2, Chopper 17/11, Luffy): the window's switch by its name, decided where the window sends it, so a
+/// refused kind (file copy and paste, session recording, audio) cannot be turned on from the client's window, neither
+/// in the engine nor in the window's own process (on Windows the --cm process serves file copy and paste itself, from
+/// the value it sends). An unknown name is left as asked: the engine reads only the names above.
+pub(crate) fn informatech_bascule_cm_nom(nom: &str, demande: bool) -> bool {
+    informatech_option_de_bascule(nom).map_or(demande, |option| informatech_bascule_cm(option, demande))
+}
+
 /// The `enable-…` options written as « N » into OVERWRITE_SETTINGS, so every reader of the option (UI, --cm window,
 /// IPC) sees the refusal too. The decision itself is `informatech_permission_refusee`, checked first by
 /// `Connection::permission` and `Connection::is_permission_enabled_locally`.
@@ -3543,6 +3566,47 @@ mod tests {
         // What the product uses is left to the client's switch.
         assert!(informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, true));
         assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, false));
+    }
+
+    /// A9-2 (Chopper 17/11, Luffy): the window that pops up with the first chat message offers « copier-coller de
+    /// fichiers » and « enregistrement de session »; switching them on does nothing.
+    #[test]
+    fn informatech_a9_cm_switches_cannot_enable_a_refused_kind() {
+        assert!(INFORMATECH_REFUSE_TRANSFERT_FICHIERS && INFORMATECH_SANS_CAPTURE);
+        for refuse in ["file", "recording", "audio"] {
+            assert!(!informatech_bascule_cm_nom(refuse, true), "{refuse}");
+            assert!(!informatech_bascule_cm_nom(refuse, false), "{refuse}");
+        }
+        // The rest is the client's choice, both ways (cutting keyboard and mouse included).
+        for libre in ["keyboard", "clipboard", "restart", "block_input", "privacy_mode"] {
+            assert!(informatech_bascule_cm_nom(libre, true), "{libre}");
+            assert!(!informatech_bascule_cm_nom(libre, false), "{libre}");
+        }
+        assert_eq!(informatech_option_de_bascule("recording"), Some(keys::OPTION_ENABLE_RECORD_SESSION));
+        assert_eq!(informatech_option_de_bascule("file"), Some(keys::OPTION_ENABLE_FILE_TRANSFER));
+        assert!(informatech_bascule_cm_nom("inconnu", true));
+    }
+
+    /// A9-2: WHERE the decision is taken. The window's process filters what it sends (its own file copy and paste
+    /// state follows what it sends); the engine filters again what it receives, for every refused kind; and on
+    /// Windows the engine no longer hands the peer's clipboard files to the window when file transfer is refused.
+    #[test]
+    fn informatech_a9_cm_switches_are_filtered_on_both_sides() {
+        let place = |source: &str, quoi: &str| source.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let cm = include_str!("ui_cm_interface.rs");
+        for entree in ["pub fn switch_permission(id: i32, name: String, enabled: bool) {", "pub fn switch_permission_all(name: String, enabled: bool) {"] {
+            let debut = place(cm, entree);
+            let filtre = debut + place(&cm[debut..], "let enabled = crate::common::informatech_bascule_cm_nom(&name, enabled);");
+            let envoi = debut + place(&cm[debut..], "Data::SwitchPermission {");
+            assert!(filtre < envoi, "{entree}");
+        }
+        let moteur = include_str!("server/connection.rs");
+        let recording = place(moteur, "} else if &name == \"recording\" {");
+        let filtre = recording + place(&moteur[recording..], "crate::common::informatech_bascule_cm(keys::OPTION_ENABLE_RECORD_SESSION, enabled)");
+        assert!(filtre < recording + place(&moteur[recording..], "conn.recording = enabled;"));
+        let clip = place(moteur, "self.send_to_cm(ipc::Data::ClipboardFile(clip));");
+        let garde = place(moteur, "if !crate::common::informatech_permission_refusee(keys::OPTION_ENABLE_FILE_TRANSFER) {");
+        assert!(garde < clip && clip - garde < 200);
     }
 
     /// S-080 (Scylla 17/11): no API server whatever the options say, so no audit, no heartbeat.
