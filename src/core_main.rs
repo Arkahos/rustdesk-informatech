@@ -434,7 +434,7 @@ pub fn core_main() -> Option<Vec<String>> {
                 import_config(&filepath);
             }
             return None;
-        } else if args[0] == "--password" {
+        } else if args[0] == "--password" || args[0] == "--password-stdin" || args[0] == "--password-random" {
             if is_cli_setting_change_disabled() {
                 println!("Settings are disabled!");
                 return None;
@@ -443,16 +443,29 @@ pub fn core_main() -> Option<Vec<String>> {
                 println!("Changing permanent password is disabled!");
                 return None;
             }
-            if args.len() == 2 {
-                if crate::platform::is_installed() && is_root() {
-                    if let Err(err) = crate::ipc::set_permanent_password(args[1].to_owned()) {
-                        println!("{err}");
-                    } else {
-                        println!("Done!");
-                    }
-                } else {
-                    println!("Installation and administrative privileges required!");
+            // InformaTech (S-078): the password comes from stdin (`--password-stdin`) or is drawn here
+            // (`--password-random`); `--password <value>` is refused. A refusal exits with a non-zero code and never
+            // prints « Done! », so a caller that was missed fails loudly.
+            let secret = match crate::common::informatech_secret_de_commande(
+                &args,
+                crate::common::informatech_lire_secret_stdin,
+            ) {
+                Ok(secret) => secret,
+                Err(refus) => {
+                    println!("{refus}");
+                    std::process::exit(2);
                 }
+            };
+            if crate::platform::is_installed() && is_root() {
+                if let Err(err) = crate::ipc::set_permanent_password(secret) {
+                    println!("{err}");
+                    std::process::exit(1);
+                } else {
+                    println!("Done!");
+                }
+            } else {
+                println!("Installation and administrative privileges required!");
+                std::process::exit(1);
             }
             return None;
         } else if args[0] == "--set-unlock-pin" {
@@ -801,10 +814,18 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
                 authority = Some((&arg.to_string()[2..]).to_owned());
                 id = args.next();
             }
-            "--password" => {
-                if let Some(password) = args.next() {
-                    param_array.push(format!("password={password}"));
+            // InformaTech (S-078): `--connect <id> --password-stdin` reads the password from stdin; a password on the
+            // command line is refused.
+            "--password-stdin" => match crate::common::informatech_lire_secret_stdin() {
+                Ok(password) => param_array.push(format!("password={password}")),
+                Err(refus) => {
+                    println!("{refus}");
+                    std::process::exit(2);
                 }
+            },
+            "--password" => {
+                println!("{}", crate::common::INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
+                std::process::exit(2);
             }
             "--relay" => {
                 param_array.push(format!("relay=true"));
@@ -899,6 +920,8 @@ fn is_user_main_ipc_scope_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
         Some("--password")
+            | Some("--password-stdin")
+            | Some("--password-random")
             | Some("--set-unlock-pin")
             | Some("--get-id")
             | Some("--set-id")
@@ -946,6 +969,8 @@ mod tests {
     fn user_main_ipc_scope_cli_command_matches_management_commands_only() {
         for command in [
             "--password",
+            "--password-stdin",
+            "--password-random",
             "--set-unlock-pin",
             "--get-id",
             "--set-id",

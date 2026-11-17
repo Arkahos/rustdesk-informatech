@@ -2455,6 +2455,65 @@ pub(crate) fn informatech_viewer_ignore(data: &crate::client::Data) -> bool {
     )
 }
 
+/// InformaTech (S-078): the access password never travels on a command line (any process of the session can read
+/// another's argv). One line read from stdin: an optional UTF-8 BOM and the trailing CR/LF are dropped, nothing else
+/// is trimmed; refused when empty, longer than 128 characters or holding a control character. Pure, for the tests.
+pub(crate) fn informatech_secret_de_ligne(ligne: &str) -> Result<String, &'static str> {
+    let s = ligne.strip_prefix('\u{feff}').unwrap_or(ligne);
+    let s = s.trim_end_matches(|c| c == '\r' || c == '\n');
+    if s.is_empty() {
+        return Err("refused: no password on stdin");
+    }
+    if s.chars().count() > 128 || s.chars().any(|c| c.is_control()) {
+        return Err("refused: invalid password on stdin");
+    }
+    Ok(s.to_owned())
+}
+
+/// Reads that one line from this process's stdin. An absent or closed stdin reads as empty, hence refused.
+pub(crate) fn informatech_lire_secret_stdin() -> Result<String, &'static str> {
+    let mut ligne = String::new();
+    std::io::stdin()
+        .read_line(&mut ligne)
+        .map_err(|_| "refused: cannot read stdin")?;
+    informatech_secret_de_ligne(&ligne)
+}
+
+/// A password nobody knows (`--password-random`): 24 characters [A-Za-z0-9] from the OS generator, each equally
+/// likely. For the callers that only need the old password to stop working (access removed, session cut): no secret
+/// has to travel at all.
+pub(crate) fn informatech_mot_de_passe_aleatoire() -> String {
+    use hbb_common::rand::{rngs::OsRng, RngCore};
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut out = String::with_capacity(24);
+    let mut octet = [0u8; 1];
+    while out.len() < 24 {
+        OsRng.fill_bytes(&mut octet);
+        // 62 * 4 = 248: reject 248..=255 so every character is equally likely.
+        if octet[0] < 248 {
+            out.push(ALPHABET[(octet[0] % 62) as usize] as char);
+        }
+    }
+    out
+}
+
+/// What the three password commands of the engine yield (`--password-stdin`, `--password-random`, and the refused
+/// `--password <value>`), given the arguments and a reader for stdin. Pure decision, tested.
+pub(crate) fn informatech_secret_de_commande(
+    args: &[String],
+    lire_stdin: impl FnOnce() -> Result<String, &'static str>,
+) -> Result<String, &'static str> {
+    match (args.first().map(String::as_str), args.len()) {
+        (Some("--password-stdin"), 1) => lire_stdin(),
+        (Some("--password-random"), 1) => Ok(informatech_mot_de_passe_aleatoire()),
+        (Some("--password"), _) => Err(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV),
+        _ => Err("refused: unexpected arguments"),
+    }
+}
+
+pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
+    "refused: the password is never given on the command line; use --password-stdin or --password-random";
+
 /// InformaTech (S-072): what a technician may never get from the client's PC, whoever asks and whatever the stored
 /// config, an `--option`, the access mode or the rendezvous server's control permissions say. The product is « see and
 /// control the screen, with the client's banner »: no TCP tunnel / RDP (`enable-tunnel` covers both), no remote
@@ -3225,6 +3284,40 @@ mod tests {
         // The « record the session » permission is refused and forced N like the S-072 kinds.
         assert!(informatech_permission_refusee(keys::OPTION_ENABLE_RECORD_SESSION));
         assert!(informatech_permissions_forcees().contains(&keys::OPTION_ENABLE_RECORD_SESSION));
+    }
+
+    #[test]
+    fn informatech_s078_password_never_on_the_command_line() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // One line of stdin: BOM and line end dropped, inner and outer spaces kept.
+        assert_eq!(informatech_secret_de_ligne("Abc 123\r\n").unwrap(), "Abc 123");
+        assert_eq!(informatech_secret_de_ligne("\u{feff} é!\n").unwrap(), " é!");
+        assert_eq!(informatech_secret_de_ligne("sans fin de ligne").unwrap(), "sans fin de ligne");
+        for refuse in ["", "\n", "\r\n", "\u{feff}\r\n", "a\tb\n", "a\u{0}b"] {
+            assert!(informatech_secret_de_ligne(refuse).is_err(), "{refuse:?}");
+        }
+        assert!(informatech_secret_de_ligne(&"x".repeat(129)).is_err());
+        assert!(informatech_secret_de_ligne(&"x".repeat(128)).is_ok());
+        // --password-stdin takes what stdin gives, and nothing when stdin is empty or unreadable.
+        assert_eq!(informatech_secret_de_commande(&a(&["--password-stdin"]), || Ok("p".into())).unwrap(), "p");
+        assert!(informatech_secret_de_commande(&a(&["--password-stdin"]), || Err("x")).is_err());
+        assert!(informatech_secret_de_commande(&a(&["--password-stdin", "p"]), || Ok("q".into())).is_err());
+        // --password <value> is refused, and stdin is not even read.
+        let lu = std::cell::Cell::new(false);
+        assert_eq!(
+            informatech_secret_de_commande(&a(&["--password", "secret"]), || {
+                lu.set(true);
+                Ok("q".into())
+            }),
+            Err(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV)
+        );
+        assert!(!lu.get());
+        // --password-random: 24 characters [A-Za-z0-9], different each time, no stdin.
+        let r1 = informatech_secret_de_commande(&a(&["--password-random"]), || Err("x")).unwrap();
+        let r2 = informatech_mot_de_passe_aleatoire();
+        assert_eq!(r1.len(), 24);
+        assert!(r1.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert_ne!(r1, r2);
     }
 
     #[test]
