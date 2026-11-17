@@ -1074,8 +1074,9 @@ mod tests {
             }
             let s = std::fs::read_to_string(p).unwrap_or_default();
             let mut i = 0;
-            while let Some(k) = s[i..].find("print(") {
-                let debut = i + k;
+            // Argos P3: `debugPrint(` holds « Print( », not « print( »: both spellings are calls to read.
+            let prochain = |d: usize| [s[d..].find("print("), s[d..].find("Print(")].into_iter().flatten().min().map(|k| d + k);
+            while let Some(debut) = prochain(i) {
                 let mut j = debut + "print(".len();
                 let mut profondeur = 1;
                 for (n, c) in s[j..].char_indices() {

@@ -42,7 +42,8 @@ Future<void> main(List<String> args) async {
 
   // InformaTech (S-078, Scylla 17/11): the arguments are never printed: a session window gets the password in its
   // JSON argument (multi_window_manager.dart), and debugPrint reaches stdout in release builds too.
-  debugPrint("launch args: ${args.length}");
+  final nombreArguments = args.length;
+  debugPrint("launch args: $nombreArguments");
   kBootArgs = List.from(args);
 
   if (!isDesktop) {

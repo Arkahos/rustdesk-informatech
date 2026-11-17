@@ -2561,9 +2561,14 @@ pub(crate) fn informatech_identifiant_valide(id: &str) -> bool {
 /// S-078 (Scylla 17/11, point 5): the pieces of the RAW command line, cut at every space, tab and double quote. Two
 /// parsers read the same Windows command line differently (Rust's std and CommandLineToArgvW disagree on `""` inside
 /// quotes: `"x"" --password y` is one argument for one and three for the other), so the start-up refusal also looks
-/// at every piece any quoting could make an argument of. Pure, for the tests.
+/// at every piece any quoting could make an argument of. Argos P4: a quote can also JOIN pieces (`--pass"word"` is
+/// one `--password` argument for any parser), so the line is read a second time with every `"` removed, cut at
+/// whitespace. Pure, for the tests.
 pub(crate) fn informatech_morceaux_de_la_ligne(ligne: &str) -> Vec<String> {
-    ligne.split(|c: char| c == '"' || c.is_whitespace()).filter(|m| !m.is_empty()).map(str::to_owned).collect()
+    let coupes = ligne.split(|c: char| c == '"' || c.is_whitespace());
+    let sans_guillemets = ligne.replace('"', "");
+    let joints = sans_guillemets.split(char::is_whitespace);
+    coupes.chain(joints).filter(|m| !m.is_empty()).map(str::to_owned).collect()
 }
 
 /// What `informatech_refus_au_demarrage` is asked about: the arguments as Rust reads them, and on Windows also the
@@ -3921,8 +3926,12 @@ mod tests {
         ] {
             assert_eq!(informatech_refus_au_demarrage(&informatech_morceaux_de_la_ligne(hub), p), None, "{hub}");
         }
+        // Argos P4: quotes that join pieces (CommandLineToArgvW reads `x"`, `--password`, `y`).
+        let joints = informatech_morceaux_de_la_ligne(r#"exe --connect 123456789 "x"" --pass"word" y"#);
+        assert!(joints.iter().any(|m| m == "--password"), "{joints:?}");
+        assert_eq!(informatech_refus_au_demarrage(&joints, p), Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV));
         assert!(informatech_morceaux_de_la_ligne("").is_empty());
-        assert_eq!(informatech_morceaux_de_la_ligne(" a\t\"b\"\"c\" "), vec!["a", "b", "c"]);
+        assert_eq!(informatech_morceaux_de_la_ligne(" a\t\"b\"\"c\" "), vec!["a", "b", "c", "a", "bc"]);
     }
 
     #[test]

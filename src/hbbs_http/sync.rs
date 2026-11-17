@@ -42,7 +42,11 @@ pub fn signal_receiver() -> broadcast::Receiver<Vec<i32>> {
 #[cfg(not(any(target_os = "ios")))]
 fn start_hbbs_sync() -> broadcast::Sender<Vec<i32>> {
     let (tx, _rx) = broadcast::channel::<Vec<i32>>(16);
-    std::thread::spawn(move || start_hbbs_sync_async());
+    // InformaTech (S-080, Argos P4): `signal_receiver()` (every incoming connection) creates SENDER through this
+    // function; with no API server the channel still exists for its callers, but the heartbeat thread never starts.
+    if !crate::common::INFORMATECH_SANS_API {
+        std::thread::spawn(move || start_hbbs_sync_async());
+    }
     return tx;
 }
 
@@ -460,9 +464,24 @@ mod informatech_tests {
     #[test]
     fn informatech_s080_no_heartbeat_no_options_from_an_answer() {
         assert_eq!(super::heartbeat_url(), "");
-        let avant = hbb_common::config::Config::get_option("custom-rendezvous-server");
-        let options = [("custom-rendezvous-server".to_owned(), "autre.example:21116".to_owned())].into_iter().collect();
+        // Argos P4: an option nothing pins (custom-rendezvous-server is in OVERWRITE_SETTINGS once the defaults ran,
+        // so it could not show a write); and the real config file is never read for it.
+        const CLE: &str = "informatech-essai-s080-jamais-epinglee";
+        assert!(!hbb_common::config::OVERWRITE_SETTINGS.read().unwrap().contains_key(CLE));
+        let avant = hbb_common::config::Config::get_option(CLE);
+        let options = [(CLE.to_owned(), "autre.example:21116".to_owned())].into_iter().collect();
         super::handle_config_options(options);
-        assert_eq!(hbb_common::config::Config::get_option("custom-rendezvous-server"), avant);
+        assert_eq!(hbb_common::config::Config::get_option(CLE), avant);
+    }
+
+    /// Argos P4: SENDER's lazy init (every incoming connection) never spawns the heartbeat thread.
+    #[test]
+    fn informatech_s080_the_heartbeat_thread_never_starts() {
+        let source = include_str!("sync.rs");
+        let debut = source.find("fn start_hbbs_sync() -> broadcast::Sender<Vec<i32>> {").unwrap();
+        let garde = debut + source[debut..].find("if !crate::common::INFORMATECH_SANS_API {").unwrap();
+        let fil = debut + source[debut..].find("std::thread::spawn(move || start_hbbs_sync_async());").unwrap();
+        assert!(garde < fil && fil - garde < 120);
+        assert!(crate::common::INFORMATECH_SANS_API);
     }
 }

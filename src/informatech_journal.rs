@@ -128,9 +128,13 @@ pub(crate) fn nettoyer(s: &str) -> String {
 }
 
 /// Bidirectional controls and zero-width formatting characters: the Unicode format characters that change how the
-/// text around them reads.
+/// text around them reads; and the line and paragraph separators (Argos P4: not `is_control`, yet a reader may break
+/// the line there), the soft hyphen and the Mongolian vowel separator (invisible).
 fn format_invisible(c: char) -> bool {
-    matches!(c, '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}')
+    matches!(
+        c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+    )
 }
 
 pub(crate) fn ligne_debut(id: &str, t: u64, genre: &'static str, pair: &str, nom: &str, ip: &str, session_ouverte: bool) -> String {
@@ -517,6 +521,8 @@ mod tests {
         // Scylla 17/11: right-to-left override, isolates, marks, zero-width characters and the BOM go.
         let nom = "PC\u{202E}exe.jpg\u{2066}x\u{2069}\u{200B}\u{200F}\u{061C}\u{FEFF}\u{2060}y";
         assert_eq!(nettoyer(nom), "PCexe.jpgxy");
+        // Argos P4: line and paragraph separators, soft hyphen, Mongolian vowel separator.
+        assert_eq!(nettoyer("a\u{2028}b\u{2029}c\u{00AD}d\u{180E}e"), "abcde");
         // Ordinary accents, other scripts and emoji stay.
         assert_eq!(nettoyer("Poste d’Élodie · 王 🙂"), "Poste d’Élodie · 王 🙂");
     }

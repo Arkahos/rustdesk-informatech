@@ -1,5 +1,6 @@
 // original cm window in Sciter version.
 
+import 'package:flutter_hbb/common/informatech_permissions.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -624,11 +625,19 @@ class _PrivilegeBoard extends StatefulWidget {
 
 class _PrivilegeBoardState extends State<_PrivilegeBoard> {
   late final client = widget.client;
+  /// InformaTech (A9-2, Scylla 18/11): `refus` = why the engine refuses this kind; the switch is then shown off,
+  /// greyed and inert, with that line instead of « ON / OFF ».
   Widget buildPermissionIcon(bool enabled, IconData iconData,
       Function(bool)? onTap, String tooltipText,
-      {required bool canModify}) {
+      {required bool canModify, String? refus}) {
+    if (refus != null) {
+      enabled = false;
+      canModify = false;
+    }
     return Tooltip(
-      message: "$tooltipText: ${enabled ? "ON" : "OFF"}",
+      message: refus != null
+          ? "$tooltipText : $refus"
+          : "$tooltipText: ${enabled ? "ON" : "OFF"}",
       waitDuration: Duration.zero,
       child: Container(
         decoration: BoxDecoration(
@@ -713,6 +722,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                         },
                         translate('Enable audio'),
                         canModify: canModifyPermission,
+                        refus: informatechRefusBascule('audio', (k) => bind.mainGetOptionSync(key: k)),
                       ),
                       buildPermissionIcon(
                         client.recording,
@@ -728,6 +738,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                         },
                         translate('Enable recording session'),
                         canModify: canModifyPermission,
+                        refus: informatechRefusBascule('recording', (k) => bind.mainGetOptionSync(key: k)),
                       ),
                     ]
                   : [
@@ -775,6 +786,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                         },
                         translate('Enable audio'),
                         canModify: canModifyPermission,
+                        refus: informatechRefusBascule('audio', (k) => bind.mainGetOptionSync(key: k)),
                       ),
                       buildPermissionIcon(
                         client.file,
@@ -790,6 +802,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                         },
                         translate('Enable file copy and paste'),
                         canModify: canModifyPermission,
+                        refus: informatechRefusBascule('file', (k) => bind.mainGetOptionSync(key: k)),
                       ),
                       buildPermissionIcon(
                         client.restart,
@@ -820,6 +833,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                         },
                         translate('Enable recording session'),
                         canModify: canModifyPermission,
+                        refus: informatechRefusBascule('recording', (k) => bind.mainGetOptionSync(key: k)),
                       ),
                       // only windows support block input
                       if (isWindows)
