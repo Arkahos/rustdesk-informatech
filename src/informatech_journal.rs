@@ -3,7 +3,9 @@
 //! (Zoro); it is the only trace that also sees a connection that did not go through InformaTech's server.
 //!
 //! - Written by the `--server` process (SYSTEM): one line when an authorized connection opens, one when it closes.
-//! - File: `%ProgramData%\InformaTech\OPMD-journal\connexions.jsonl`, UTF-8, one JSON object per line, `\n` ended.
+//! - File: `<system drive>\ProgramData\InformaTech\OPMD-journal\connexions.jsonl`, UTF-8, one JSON object per line,
+//!   `\n` ended. The drive is the one of Windows' own system directory, asked to Windows (never an environment
+//!   variable): the Hub finds the file the same way.
 //!   The folder is NOT A12's (`OPMD`, SYSTEM and Administrators only): the Hub reads the log as the logged-on user,
 //!   so this one adds a read-only entry for BUILTIN\Users. The parent keeps A12's two entries: a user opens the file by
 //!   its full path (bypass traverse checking), and cannot plant anything next to it.
@@ -20,6 +22,12 @@
 //!   never blocks, delays or ends a session, and is not retried in a loop.
 //! - The log is the client's record: nothing in the engine removes it (it survives « retirer » and an uninstall).
 //!   Kept lines stay byte-identical; above 256 KB only the most recent lines stay (at most 500).
+//! - Bounded life (Styx 17/11, the log holds the remote side's address): a line older than one year goes the next
+//!   time the file is re-created (service start, or the cap). A clock that reads 0 drops nothing, and a line dated in
+//!   the future is kept.
+//! - Visible when off (Scylla 17/11): `HKLM\SOFTWARE\InformaTech\OPMD-journal`, `etat` = `actif` | `hors-service`
+//!   and `t` (seconds since 1970 UTC), written by the service at start and on every change. A standard user reads it
+//!   and cannot write it; the Hub reports it. Absent means unknown (older engine, service never started), not « actif ».
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -34,6 +42,27 @@ const MAX_OCTETS: usize = 256 * 1024;
 const LIGNES_GARDEES: usize = 500;
 const MAX_LIGNE: usize = 1024;
 const MAX_TEXTE: usize = 64;
+/// Styx 17/11: how long a line may stay in the log, in seconds (365 days).
+const DUREE_DE_VIE: u64 = 365 * 24 * 3600;
+/// The two words of the published state (see the module's header), pinned with the Hub.
+pub(crate) const ETAT_ACTIF: &str = "actif";
+pub(crate) const ETAT_HORS_SERVICE: &str = "hors-service";
+
+pub(crate) fn etat(pret: bool) -> &'static str {
+    if pret {
+        ETAT_ACTIF
+    } else {
+        ETAT_HORS_SERVICE
+    }
+}
+
+/// The log's folder from Windows' system directory (`C:\Windows\System32` → `C:\ProgramData\InformaTech\OPMD-journal`);
+/// None when that is not a path on a lettered drive.
+pub(crate) fn dossier_du_journal(systeme: &str) -> Option<String> {
+    let o = systeme.as_bytes();
+    (o.len() >= 3 && o[0].is_ascii_alphabetic() && o[1] == b':' && o[2] == b'\\')
+        .then(|| format!("{}\\ProgramData\\InformaTech\\{DOSSIER}", &systeme[..2]))
+}
 
 #[derive(Serialize)]
 struct Debut<'a> {
@@ -86,24 +115,37 @@ pub(crate) fn ligne_fin(id: &str, t: u64) -> String {
     serde_json::to_string(&Fin { v: 1, evt: "fin", id, t }).unwrap_or_default()
 }
 
-/// A line this module could have written: the only ones kept when the file is re-created.
-pub(crate) fn ligne_valide(l: &[u8]) -> bool {
+/// The `t` of a line this module could have written, None for anything else.
+fn instant(l: &[u8]) -> Option<u64> {
     if l.is_empty() || l.len() > MAX_LIGNE {
-        return false;
+        return None;
     }
     let Ok(serde_json::Value::Object(o)) = serde_json::from_slice::<serde_json::Value>(l) else {
-        return false;
+        return None;
     };
-    o.get("v").and_then(|v| v.as_u64()) == Some(1)
+    let notre = o.get("v").and_then(|v| v.as_u64()) == Some(1)
         && matches!(o.get("evt").and_then(|v| v.as_str()), Some("debut") | Some("fin"))
-        && o.get("id").and_then(|v| v.as_str()).is_some_and(|i| i.len() == 16 && i.bytes().all(|b| b.is_ascii_hexdigit()))
-        && o.get("t").is_some_and(|v| v.is_u64())
+        && o.get("id").and_then(|v| v.as_str()).is_some_and(|i| i.len() == 16 && i.bytes().all(|b| b.is_ascii_hexdigit()));
+    o.get("t").and_then(|v| v.as_u64()).filter(|_| notre)
 }
 
-/// The content to keep from an existing file: its valid lines, untouched; when they weigh more than the cap, only the
-/// most recent ones (at most `LIGNES_GARDEES`, and half the cap, so the next trim is not one line away).
-pub(crate) fn garder(contenu: &[u8]) -> Vec<u8> {
-    let valides: Vec<&[u8]> = contenu.split(|b| *b == b'\n').filter(|l| ligne_valide(l)).collect();
+/// A line this module could have written: the only ones kept when the file is re-created.
+pub(crate) fn ligne_valide(l: &[u8]) -> bool {
+    instant(l).is_some()
+}
+
+/// Styx 17/11: a line dated more than one year before `maintenant`. Never with a clock that reads 0, never for a
+/// line dated in the future. (A clock set far ahead would still age the lines: nothing here can tell.)
+pub(crate) fn perimee(t: u64, maintenant: u64) -> bool {
+    maintenant != 0 && t.saturating_add(DUREE_DE_VIE) < maintenant
+}
+
+/// The content to keep from an existing file: its valid lines that are not older than one year, untouched; when
+/// they weigh more than the cap, only the most recent ones (at most `LIGNES_GARDEES`, and half the cap, so the next
+/// trim is not one line away).
+pub(crate) fn garder(contenu: &[u8], maintenant: u64) -> Vec<u8> {
+    let valides: Vec<&[u8]> =
+        contenu.split(|b| *b == b'\n').filter(|l| instant(l).is_some_and(|t| !perimee(t, maintenant))).collect();
     let total: usize = valides.iter().map(|l| l.len() + 1).sum();
     let mut premier = 0;
     if total > MAX_OCTETS {
@@ -163,7 +205,7 @@ pub(crate) fn plan(parent: Niveau, dossier: Niveau, fichier: Niveau) -> Plan {
 /// Re-creates the log of folder `d` from `ancien` (see `garder`): written to a brand-new temporary file, then renamed
 /// over the log. Nothing else in the folder is touched. The only thing deleted is this module's own temporary file,
 /// one file, never a folder and never recursively: if that name is anything else, this fails and nothing is logged.
-pub(crate) fn recreer(d: &Path, ancien: &[u8]) -> std::io::Result<()> {
+pub(crate) fn recreer(d: &Path, ancien: &[u8], maintenant: u64) -> std::io::Result<()> {
     use std::io::Write;
     let tmp = d.join(TEMPORAIRE);
     match std::fs::symlink_metadata(&tmp) {
@@ -173,14 +215,14 @@ pub(crate) fn recreer(d: &Path, ancien: &[u8]) -> std::io::Result<()> {
         Err(e) => return Err(e),
     }
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    f.write_all(&garder(ancien))?;
+    f.write_all(&garder(ancien, maintenant))?;
     f.sync_all()?;
     drop(f);
     std::fs::rename(&tmp, d.join(FICHIER))
 }
 
 /// Appends one line to the log `recreer` made (never creates the file), and trims it when it passes the cap.
-pub(crate) fn ajouter(d: &Path, ligne: &str) -> std::io::Result<()> {
+pub(crate) fn ajouter(d: &Path, ligne: &str, maintenant: u64) -> std::io::Result<()> {
     use std::io::Write;
     let p = d.join(FICHIER);
     let mut f = std::fs::OpenOptions::new().append(true).open(&p)?;
@@ -190,7 +232,7 @@ pub(crate) fn ajouter(d: &Path, ligne: &str) -> std::io::Result<()> {
     let taille = f.metadata()?.len() as usize;
     drop(f);
     if taille > MAX_OCTETS {
-        recreer(d, &lire(&p))?;
+        recreer(d, &lire(&p), maintenant)?;
     }
     Ok(())
 }
@@ -198,7 +240,7 @@ pub(crate) fn ajouter(d: &Path, ligne: &str) -> std::io::Result<()> {
 #[cfg(windows)]
 mod service {
     use super::*;
-    use crate::informatech_rotation::{commande_ok, fiable, poser_dacl};
+    use crate::informatech_rotation::{commande_ok, fiable, poser_dacl, systeme32};
     use hbb_common::rand::{rngs::OsRng, RngCore};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -217,9 +259,24 @@ mod service {
     /// After a failure the folder is looked at again at most this often, and only when a connection needs it.
     const NOUVEL_ESSAI: Duration = Duration::from_secs(600);
 
-    fn dossier() -> PathBuf {
-        let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        base.join("InformaTech").join(DOSSIER)
+    /// None when Windows does not give its system directory: nothing is logged then (and the state says so).
+    fn dossier() -> Option<PathBuf> {
+        dossier_du_journal(systeme32("")?.to_str()?).map(PathBuf::from)
+    }
+
+    /// Where the service says whether it logs (see the module's header). Machine-wide, written by SYSTEM only.
+    const CLE_ETAT: &str = r"SOFTWARE\InformaTech\OPMD-journal";
+
+    /// Publishes the state for the client's Hub. Called at start and when the state changes, never per connection.
+    fn publier(pret: bool) {
+        use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+        let ecrit = RegKey::predef(HKEY_LOCAL_MACHINE).create_subkey(CLE_ETAT).and_then(|(cle, _)| {
+            cle.set_value("etat", &etat(pret))?;
+            cle.set_value("t", &maintenant())
+        });
+        if ecrit.is_err() {
+            journal("the state of the connection log could not be published");
+        }
     }
 
     fn maintenant() -> u64 {
@@ -267,17 +324,24 @@ mod service {
             return false;
         }
         let ancien = if creer_dossier { Vec::new() } else { lire(&p) };
-        recreer(d, &ancien).is_ok() && fiable(&p)
+        recreer(d, &ancien, maintenant()).is_ok() && fiable(&p)
     }
 
     fn boucle(rx: Receiver<Message>) {
-        let d = dossier();
+        let Some(d) = dossier() else {
+            journal("connections are not logged: Windows did not give its system directory");
+            publier(false);
+            // The queue is still emptied, so the sessions' side never sees it full for good.
+            while rx.recv().is_ok() {}
+            return;
+        };
         let mut ouvertes: HashMap<i32, String> = HashMap::new();
         let mut pret = preparer(&d);
         let mut dernier_essai = Instant::now();
         if !pret {
             journal("connections are not logged: the log folder is not trusted or cannot be prepared");
         }
+        publier(pret);
         while let Ok(message) = rx.recv() {
             let ligne = match message {
                 Message::Debut { conn_id, t, genre, pair, nom, ip } => {
@@ -296,15 +360,19 @@ mod service {
             if !pret && dernier_essai.elapsed() >= NOUVEL_ESSAI {
                 pret = preparer(&d);
                 dernier_essai = Instant::now();
+                if pret {
+                    publier(true);
+                }
             }
             if !pret || ligne.is_empty() {
                 continue;
             }
             // Looked at again before every write: an untrusted level means skip, never repair.
-            if !(fiable(&d) && fiable(&d.join(FICHIER))) || ajouter(&d, &ligne).is_err() {
+            if !(fiable(&d) && fiable(&d.join(FICHIER))) || ajouter(&d, &ligne, maintenant()).is_err() {
                 pret = false;
                 dernier_essai = Instant::now();
                 journal("connections are not logged: the log is not trusted or cannot be written");
+                publier(false);
             }
         }
     }
@@ -400,9 +468,57 @@ mod tests {
         // A torn last line, a stranger's text and invalid UTF-8 go; the valid lines stay byte for byte, in order.
         let mut contenu = format!("{bonne}\nintrus\n{}\n", ligne_debut(ID, 6, "controle", "p", "n", "", true)).into_bytes();
         contenu.extend_from_slice(b"\xff\xfe\n{\"v\":1,\"evt\":\"fin\",\"id\":\"0123");
-        let garde = garder(&contenu);
+        let garde = garder(&contenu, 0);
         assert_eq!(garde, format!("{bonne}\n{}\n", ligne_debut(ID, 6, "controle", "p", "n", "", true)).into_bytes());
-        assert!(garder(b"").is_empty());
+        assert!(garder(b"", 0).is_empty());
+    }
+
+    /// Styx 17/11: the log keeps the remote side's address, so a line lives one year at most.
+    #[test]
+    fn a_line_lives_one_year() {
+        const AN: u64 = 365 * 24 * 3600;
+        let maintenant = 1_763_340_000u64;
+        assert!(!perimee(maintenant, maintenant));
+        assert!(!perimee(maintenant - AN, maintenant), "exactly one year old: kept");
+        assert!(perimee(maintenant - AN - 1, maintenant));
+        assert!(perimee(0, maintenant));
+        // A clock that reads 0 drops nothing; a line dated in the future is kept; no overflow at the end of time.
+        assert!(!perimee(0, 0) && !perimee(5, 0));
+        assert!(!perimee(maintenant + 10 * AN, maintenant));
+        assert!(!perimee(u64::MAX, maintenant) && !perimee(u64::MAX, u64::MAX));
+        assert!(perimee(1, u64::MAX));
+        let vieille_debut = ligne_debut(ID, maintenant - AN - 1, "controle", "p", "n", "203.0.113.7", true);
+        let vieille_fin = ligne_fin(ID, maintenant - AN - 1);
+        let limite = ligne_fin(ID, maintenant - AN);
+        let recente = ligne_debut("fedcba9876543210", maintenant - 60, "controle", "p", "n", "203.0.113.7", true);
+        let future = ligne_fin("fedcba9876543210", maintenant + AN);
+        let contenu = format!("{vieille_debut}\n{vieille_fin}\n{limite}\n{recente}\n{future}\n");
+        // Old lines go, the others stay byte for byte and in order; the address goes with its line.
+        let garde = String::from_utf8(garder(contenu.as_bytes(), maintenant)).unwrap();
+        assert_eq!(garde, format!("{limite}\n{recente}\n{future}\n"));
+        // With a clock at 0 everything stays.
+        assert_eq!(garder(contenu.as_bytes(), 0), contenu.as_bytes());
+        // The file on disk follows: re-creating it a year later leaves only what is still young.
+        let d = dossier_d_essai("un-an");
+        recreer(&d, contenu.as_bytes(), 0).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), contenu);
+        recreer(&d, &lire(&d.join(FICHIER)), maintenant).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), garde);
+        recreer(&d, &lire(&d.join(FICHIER)), maintenant + 2 * AN + 1).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), "");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Scylla 17/11: the state the Hub reads, and where the log lives (the same rule as the Hub's reader).
+    #[test]
+    fn the_state_words_and_the_folder_are_pinned() {
+        assert_eq!(etat(true), "actif");
+        assert_eq!(etat(false), "hors-service");
+        assert_eq!(dossier_du_journal(r"C:\Windows\System32").as_deref(), Some(r"C:\ProgramData\InformaTech\OPMD-journal"));
+        assert_eq!(dossier_du_journal(r"d:\WINDOWS\system32\").as_deref(), Some(r"d:\ProgramData\InformaTech\OPMD-journal"));
+        for refuse in ["", "C:", "C:Windows", r"\\serveur\partage\System32", "/usr/lib", r"1:\Windows", r"é:\Windows"] {
+            assert_eq!(dossier_du_journal(refuse), None, "{refuse}");
+        }
     }
 
     #[test]
@@ -411,7 +527,7 @@ mod tests {
         let n = MAX_OCTETS / ligne(0).len() + 50;
         let contenu: String = (0..n).map(|i| ligne(i) + "\n").collect();
         assert!(contenu.len() > MAX_OCTETS);
-        let garde = garder(contenu.as_bytes());
+        let garde = garder(contenu.as_bytes(), 0);
         let lignes: Vec<&str> = std::str::from_utf8(&garde).unwrap().lines().collect();
         assert_eq!(lignes.len(), LIGNES_GARDEES);
         assert!(garde.len() <= MAX_OCTETS / 2);
@@ -420,7 +536,7 @@ mod tests {
         assert_eq!(lignes[0], ligne(n - LIGNES_GARDEES));
         // Under the cap nothing is dropped.
         let petit: String = (0..600).map(|i| ligne_fin(&format!("{i:016x}"), i as u64) + "\n").collect();
-        assert_eq!(garder(petit.as_bytes()), petit.as_bytes());
+        assert_eq!(garder(petit.as_bytes(), 0), petit.as_bytes());
     }
 
     /// Scylla 17/11: an untrusted level (a reparse point, a folder a user owns: `Douteux`, told by
@@ -453,18 +569,18 @@ mod tests {
         std::fs::create_dir_all(d.join("sous-dossier").join("x")).unwrap();
         // A leftover of an interrupted trim is the one thing this module deletes.
         std::fs::write(d.join(TEMPORAIRE), "reste d'un arrêt").unwrap();
-        recreer(&d, &lire(&d.join(FICHIER))).unwrap();
+        recreer(&d, &lire(&d.join(FICHIER)), 0).unwrap();
         // Its valid lines stay, byte for byte; the neighbours are still there.
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), format!("{}\n", ligne_fin(ID, 1)));
         assert_eq!(std::fs::read_to_string(d.join("autre.txt")).unwrap(), "x");
         assert!(d.join("sous-dossier").join("x").is_dir());
         assert!(!d.join(TEMPORAIRE).exists());
-        ajouter(&d, &ligne_fin(ID, 2)).unwrap();
-        ajouter(&d, &ligne_fin(ID, 3)).unwrap();
+        ajouter(&d, &ligne_fin(ID, 2), 0).unwrap();
+        ajouter(&d, &ligne_fin(ID, 3), 0).unwrap();
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), format!("{}\n{}\n{}\n", ligne_fin(ID, 1), ligne_fin(ID, 2), ligne_fin(ID, 3)));
         // The temporary name taken by a folder: refused, the folder and its content are left alone, the log unchanged.
         std::fs::create_dir_all(d.join(TEMPORAIRE).join("garde")).unwrap();
-        assert!(recreer(&d, b"").is_err());
+        assert!(recreer(&d, b"", 0).is_err());
         assert!(d.join(TEMPORAIRE).join("garde").is_dir());
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap().lines().count(), 3);
         std::fs::remove_dir_all(&d).unwrap();
@@ -473,14 +589,14 @@ mod tests {
     #[test]
     fn appending_never_creates_the_file_and_trims_past_the_cap() {
         let d = dossier_d_essai("ajouter");
-        assert!(ajouter(&d, &ligne_fin(ID, 1)).is_err());
+        assert!(ajouter(&d, &ligne_fin(ID, 1), 0).is_err());
         assert!(!d.join(FICHIER).exists());
-        recreer(&d, &[]).unwrap();
+        recreer(&d, &[], 0).unwrap();
         let ligne = |i: usize| ligne_debut(&format!("{i:016x}"), i as u64, "controle", &"p".repeat(32), &"n".repeat(32), "203.0.113.7", true);
         let n = MAX_OCTETS / (ligne(0).len() + 1);
         let presque: String = (0..n).map(|i| ligne(i) + "\n").collect();
         std::fs::write(d.join(FICHIER), &presque).unwrap();
-        ajouter(&d, &ligne(n)).unwrap();
+        ajouter(&d, &ligne(n), 0).unwrap();
         let apres = std::fs::read_to_string(d.join(FICHIER)).unwrap();
         assert!(apres.len() <= MAX_OCTETS / 2);
         assert_eq!(apres.lines().count(), LIGNES_GARDEES);

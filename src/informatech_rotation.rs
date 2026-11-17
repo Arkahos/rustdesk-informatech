@@ -200,7 +200,7 @@ fn etat_fiable() -> bool {
 
 /// A Windows tool by its full System32 path, asked to Windows itself: no PATH search, no environment variable a
 /// user could set, no shell (Scylla 17/11).
-fn systeme32(programme: &str) -> Option<PathBuf> {
+pub(crate) fn systeme32(programme: &str) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
     let mut tampon = [0u16; 260];
