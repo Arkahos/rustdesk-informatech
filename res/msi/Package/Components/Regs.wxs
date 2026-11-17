@@ -43,19 +43,8 @@
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.URLProtocol" Guid="565BE3F8-23A7-4B9D-B0DE-6D51CC86FC0B">
-				<RegistryKey Root="HKCR" Key="$(var.ProductLower)">
-					<RegistryValue Type="string" Name="URL Protocol" Value="" />
-				</RegistryKey>
-			</Component>
-
-			<Component Id="Product.Registry.Command" Guid="BC8D581C-5960-4843-93DC-E347CD43BD49">
-				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell" />
-				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell\open" />
-				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell\open\command">
-					<RegistryValue Type="string" Value='"[INSTALLFOLDER_INNER]$(var.Product).exe" "%1"' />
-				</RegistryKey>
-			</Component>
+			<!-- InformaTech (Scylla 17/11, S-078): no URL scheme is registered for the engine: a registered scheme lets any
+			     web page start it with arguments of its choosing. No Hub flow uses a link. -->
 
 			<Component Id="Product.Registry.InstallState" Guid="E310003A-C292-4851-AE20-7A9B186060CE">
 				<RegistryKey Root="HKLM" Key="Software\$(var.Product)\InstallState\$(var.Product)" ForceDeleteOnUninstall="yes">

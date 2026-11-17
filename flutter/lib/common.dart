@@ -29,6 +29,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 
 import '../consts.dart';
+import 'common/informatech_lien.dart';
 import 'common/widgets/overlay.dart';
 import 'mobile/pages/file_manager_page.dart';
 import 'mobile/pages/remote_page.dart';
@@ -2196,8 +2197,15 @@ Future<bool> initUniLinks() async {
   // check cold boot
   try {
     final initialLink = await getInitialLink();
-    print("initialLink: $initialLink");
+    // InformaTech (S-078, Argos P4): a link is never printed, it may hold a password.
+    print("initialLink: ${initialLink == null || initialLink.isEmpty ? 'none' : 'received'}");
     if (initialLink == null || initialLink.isEmpty) {
+      return false;
+    }
+    // InformaTech (S-078, Argos P3): the link this process was started with sat on its command line: a password in
+    // it is refused. The engine exits before this on desktop (core_main); this is the second lock.
+    if (!isWeb && lienAvecMotDePasse(initialLink)) {
+      print("initialLink refused: it carries a password");
       return false;
     }
     if (isWeb) {
@@ -2223,7 +2231,7 @@ StreamSubscription? listenUniLinks({handleByFlutter = true}) {
   }
 
   final sub = uriLinkStream.listen((Uri? uri) {
-    debugPrint("A uri was received: $uri. handleByFlutter $handleByFlutter");
+    debugPrint("A uri was received. handleByFlutter $handleByFlutter");
     if (uri != null) {
       if (handleByFlutter) {
         handleUriLink(uri: uri);

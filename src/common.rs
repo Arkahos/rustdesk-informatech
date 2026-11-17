@@ -2530,6 +2530,57 @@ pub(crate) fn informatech_prendre_secret_connexion() -> Option<String> {
 pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
     "refused: the password is never given on the command line; use --password-stdin or --password-random";
 
+/// S-078: true when a command-line argument is one of our links (`prefixe` = `<app>://`) that carries a password:
+/// a `password` query parameter (the Dart side lower-cases and percent-decodes the names, so this does too) or the
+/// `<app>://password/<value>` form. Pure, for the tests.
+pub(crate) fn informatech_lien_avec_mot_de_passe(arg: &str, prefixe: &str) -> bool {
+    let a = arg.trim();
+    let Some(debut) = a.get(..prefixe.len()) else {
+        return false;
+    };
+    if !debut.eq_ignore_ascii_case(prefixe) {
+        return false;
+    }
+    let reste = &a[prefixe.len()..];
+    let autorite = reste.split(['/', '?', '#']).next().unwrap_or("");
+    if informatech_decoder_pourcent(autorite).eq_ignore_ascii_case("password") {
+        return true;
+    }
+    let Some((_, requete)) = reste.split_once('?') else {
+        return false;
+    };
+    let requete = requete.split('#').next().unwrap_or("");
+    requete.split(['&', ';']).any(|parametre| {
+        let nom = parametre.split('=').next().unwrap_or("");
+        informatech_decoder_pourcent(nom).trim().eq_ignore_ascii_case("password")
+    })
+}
+
+/// `%41` → `A`, `+` → space; anything malformed stays as it is.
+fn informatech_decoder_pourcent(s: &str) -> String {
+    let o = s.as_bytes();
+    let mut sortie = Vec::with_capacity(o.len());
+    let mut i = 0;
+    while i < o.len() {
+        let hexa = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+        match (o[i], o.get(i + 1).copied().and_then(hexa), o.get(i + 2).copied().and_then(hexa)) {
+            (b'%', Some(h), Some(l)) => {
+                sortie.push(h * 16 + l);
+                i += 3;
+            }
+            (b'+', _, _) => {
+                sortie.push(b' ');
+                i += 1;
+            }
+            (b, _, _) => {
+                sortie.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&sortie).into_owned()
+}
+
 /// InformaTech (S-072): what a technician may never get from the client's PC, whoever asks and whatever the stored
 /// config, an `--option`, the access mode or the rendezvous server's control permissions say. The product is « see and
 /// control the screen, with the client's banner »: no TCP tunnel / RDP (`enable-tunnel` covers both), no remote
@@ -3339,6 +3390,38 @@ mod tests {
         informatech_deposer_secret_connexion("p".to_owned());
         assert_eq!(informatech_prendre_secret_connexion().as_deref(), Some("p"));
         assert_eq!(informatech_prendre_secret_connexion(), None);
+    }
+
+    #[test]
+    fn informatech_s078_no_password_in_a_command_line_link() {
+        let p = "informatech://";
+        for refuse in [
+            "informatech://connect/123456789?password=secret",
+            "InformaTech://connect/123456789?relay=true&PASSWORD=secret",
+            "informatech://123456789?key=abc;password=secret",
+            "informatech://connect/123456789?p%61ssword=secret",
+            "informatech://connect/123456789?%50assword=secret#x",
+            "informatech://connect/123456789?password",
+            " informatech://connect/123456789?password=secret ",
+            "informatech://password/secret",
+            "informatech://PASS%57ORD/secret",
+        ] {
+            assert!(informatech_lien_avec_mot_de_passe(refuse, p), "{refuse}");
+        }
+        for accepte in [
+            "informatech://connect/123456789",
+            "informatech://connect/123456789?relay=true&key=abc",
+            "informatech://connect/123456789?motdepasse=x&passwordx=y&xpassword=z",
+            "informatech://connect/123456789#password=x",
+            "informatech://",
+            // Not a link of ours: the command-line parser deals with it (`--password <value>` is refused there).
+            "--password",
+            "password=secret",
+            "autre://connect/1?password=secret",
+            "é",
+        ] {
+            assert!(!informatech_lien_avec_mot_de_passe(accepte, p), "{accepte}");
+        }
     }
 
     #[test]

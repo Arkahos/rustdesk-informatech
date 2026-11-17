@@ -80,6 +80,17 @@ pub fn core_main() -> Option<Vec<String>> {
         }
         i += 1;
     }
+    // InformaTech (S-078, Argos P3 and Scylla 17/11): a link given on the command line never carries a password
+    // either (`<exe> <scheme>://connect/<id>?password=…`). Refused here, before anything reads or forwards it, with the
+    // same sentence and exit code as `--password <value>`.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if std::env::args()
+        .skip(1)
+        .any(|a| crate::common::informatech_lien_avec_mot_de_passe(&a, &crate::get_uri_prefix()))
+    {
+        println!("{}", crate::common::INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
+        std::process::exit(2);
+    }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if args.is_empty() {
         #[cfg(target_os = "linux")]
