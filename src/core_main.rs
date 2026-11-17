@@ -435,13 +435,15 @@ pub fn core_main() -> Option<Vec<String>> {
             }
             return None;
         } else if args[0] == "--password" || args[0] == "--password-stdin" || args[0] == "--password-random" {
+            // InformaTech (S-078): exit code 0 means « the service took the password » and nothing else: the Hub's
+            // elevated callers can read nothing but the exit code. These two refusals used to end with 0.
             if is_cli_setting_change_disabled() {
                 println!("Settings are disabled!");
-                return None;
+                std::process::exit(1);
             }
             if config::Config::is_disable_change_permanent_password() {
                 println!("Changing permanent password is disabled!");
-                return None;
+                std::process::exit(1);
             }
             // InformaTech (S-078): the password comes from stdin (`--password-stdin`) or is drawn here
             // (`--password-random`); `--password <value>` is refused. A refusal exits with a non-zero code and never
