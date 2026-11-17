@@ -1124,7 +1124,7 @@ pub fn get_custom_rendezvous_server(custom: String) -> String {
 
 #[inline]
 pub fn get_api_server(api: String, custom: String) -> String {
-    if Config::no_register_device() {
+    if INFORMATECH_SANS_API || Config::no_register_device() {
         return "".to_owned();
     }
     let mut res = get_api_server_(api, custom);
@@ -2432,6 +2432,17 @@ pub(crate) const INFORMATECH_VIEWER_REFUS: &str =
 /// switch: captures would first need consent text, a storage place and a retention rule (a product decision).
 pub(crate) const INFORMATECH_SANS_CAPTURE: bool = true;
 
+/// InformaTech (S-080, Scylla 17/11): no API server, in any build. Upstream derived one from the rendezvous server
+/// (`http://opmd.informatech-paca.fr:21114`): every incoming connection then posted the peer's address (before
+/// authentication), its id and name to `/api/audit/conn` in plain HTTP, the heartbeat posted the PC's user and host
+/// names, and its answer could write ANY option (`handle_config_options`). With no API server there is no audit, no
+/// heartbeat, no login, no address book and no recording upload: OPMD only needs the ID and relay server.
+pub(crate) const INFORMATECH_SANS_API: bool = true;
+
+/// InformaTech (S-080): the server is pinned in the engine (`OPMD_SERVER`, `OPMD_SERVER_KEY`); a renamed executable
+/// (`<app>-host=…,key=…,api=….exe`) never brings another rendezvous, relay, key or API server.
+pub(crate) const INFORMATECH_SERVEUR_EPINGLE: bool = true;
+
 /// UI orders dropped because of `INFORMATECH_SANS_CAPTURE`: start a recording, take a screenshot.
 pub(crate) fn informatech_capture_ignoree(data: &crate::client::Data) -> bool {
     use crate::client::Data;
@@ -3532,6 +3543,24 @@ mod tests {
         // What the product uses is left to the client's switch.
         assert!(informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, true));
         assert!(!informatech_bascule_cm(keys::OPTION_ENABLE_KEYBOARD, false));
+    }
+
+    /// S-080 (Scylla 17/11): no API server whatever the options say, so no audit, no heartbeat.
+    #[test]
+    fn informatech_s080_no_api_server_no_audit() {
+        assert!(INFORMATECH_SANS_API && INFORMATECH_SERVEUR_EPINGLE);
+        for (api, custom) in [
+            ("", ""),
+            ("", "opmd.informatech-paca.fr"),
+            ("", "opmd.informatech-paca.fr:21116"),
+            ("http://opmd.informatech-paca.fr:21114", ""),
+            ("https://api.example.net", "rendezvous.example.net"),
+        ] {
+            assert_eq!(get_api_server(api.to_owned(), custom.to_owned()), "", "{api} {custom}");
+            for typ in ["conn", "file", "alarm"] {
+                assert_eq!(get_audit_server(api.to_owned(), custom.to_owned(), typ.to_owned()), "", "{api} {custom} {typ}");
+            }
+        }
     }
 
     #[test]
