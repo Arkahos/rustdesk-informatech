@@ -301,7 +301,7 @@ pub(crate) fn ajouter(d: &Path, ligne: &str, maintenant: u64) -> std::io::Result
 #[cfg(windows)]
 mod service {
     use super::*;
-    use crate::informatech_rotation::{commande_ok, creer_dossier_ferme, fiable, poser_dacl, systeme32};
+    use crate::informatech_rotation::{commande_ok, creer_dossier_ferme, fiable, niveau, poser_dacl, systeme32};
     use hbb_common::rand::{rngs::OsRng, RngCore};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -352,14 +352,6 @@ mod service {
     /// Fixed event names only: never a peer's text. Called at most once per failure, never per connection.
     fn journal(evenement: &'static str) {
         hbb_common::log::warn!("informatech journal: {evenement}");
-    }
-
-    fn niveau(p: &Path) -> Niveau {
-        match std::fs::symlink_metadata(p) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Niveau::Absent,
-            Ok(_) if fiable(p) => Niveau::Fiable,
-            _ => Niveau::Douteux,
-        }
     }
 
     /// True when the log is ready to be appended to. Order (Scylla 17/11): the trust check FIRST, on the three

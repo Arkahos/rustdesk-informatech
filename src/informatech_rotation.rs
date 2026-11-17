@@ -18,9 +18,21 @@
 //!   `<url>/v1/acces/mot-de-passe { jeton, motDePasse }`: 204 done; 410/404/401 stop and clear; 400 kept, no retry until
 //!   the next trigger; 429/5xx/network kept, same value retried every 5 minutes, at most 24 hours.
 //! - Logs carry fixed event names only (`journal` takes `&'static str`): never the token, the URL or a password.
+//! - Visible when off (Scylla 17/11, like the connection log): `HKLM\SOFTWARE\InformaTech\OPMD-rotation`, `etat` =
+//!   `actif` | `hors-service` and `t` (seconds since 1970 UTC), written by the service at start and on every change.
+//!   `hors-service` = rotation cannot run on this PC (a level not trusted, the state file unreadable): exactly the
+//!   cases where `--informatech-rotation` exits 3, so a refusal is never silent. No key = not configured (nothing on
+//!   disk, or cleared), an older engine, or a service that never started. The decision is `publication` (pure).
+//! - Compiled everywhere so its pure parts are tested on any host; everything that touches Windows is `cfg(windows)`.
 
-use hbb_common::{config::Config, rand::rngs::OsRng, rand::RngCore, ResultType};
+#![cfg_attr(not(windows), allow(dead_code))]
+
+use crate::informatech_journal::{plan, Niveau, Plan, ETAT_ACTIF, ETAT_HORS_SERVICE};
+#[cfg(windows)]
+use hbb_common::config::Config;
+use hbb_common::{rand::rngs::OsRng, rand::RngCore, ResultType};
 use serde_derive::{Deserialize, Serialize};
+#[cfg(windows)]
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -132,12 +144,53 @@ fn maintenant() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Where the service says whether rotation runs (see the module's header). Machine-wide, written by SYSTEM only.
+pub(crate) const CLE_ETAT: &str = r"SOFTWARE\InformaTech\OPMD-rotation";
+
+/// What the service publishes for the client's Hub.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Publication {
+    /// Configured, every level trusted, the state file read: `actif`.
+    Actif,
+    /// Rotation cannot run on this PC: `hors-service`.
+    HorsService,
+    /// Nothing configured (no state file under trusted or missing folders): the key is removed.
+    NonConfiguree,
+}
+
+/// Pure decision (Scylla 17/11). `niveaux` = the trust check of `InformaTech`, `OPMD` and the state file (None: Windows
+/// gave no system directory); `lisible` = the file, when all three are trusted, reads as a state. It follows the same
+/// rule as the elevated writer (`informatech_journal::plan`, used by `proteger`): wherever that writer refuses
+/// (exit 3), this says `hors-service`.
+pub(crate) fn publication(niveaux: Option<(Niveau, Niveau, Niveau)>, lisible: bool) -> Publication {
+    let Some((parent, dossier, fichier)) = niveaux else {
+        return Publication::HorsService;
+    };
+    match plan(parent, dossier, fichier) {
+        Plan::Passer => Publication::HorsService,
+        Plan::Ecrire { .. } if fichier == Niveau::Absent => Publication::NonConfiguree,
+        Plan::Ecrire { .. } if lisible => Publication::Actif,
+        Plan::Ecrire { .. } => Publication::HorsService,
+    }
+}
+
+/// The word under `etat`, None for « remove the key ». The Hub reads anything else as « inconnu ».
+pub(crate) fn mot_publie(p: Publication) -> Option<&'static str> {
+    match p {
+        Publication::Actif => Some(ETAT_ACTIF),
+        Publication::HorsService => Some(ETAT_HORS_SERVICE),
+        Publication::NonConfiguree => None,
+    }
+}
+
 /// None when Windows does not give its system directory: then no state is read or written.
+#[cfg(windows)]
 fn dossier() -> Option<PathBuf> {
     let systeme = systeme32("")?;
     crate::informatech_journal::sous_programdata(systeme.to_str()?, "OPMD").map(PathBuf::from)
 }
 
+#[cfg(windows)]
 fn chemin() -> Option<PathBuf> {
     dossier().map(|d| d.join(FICHIER))
 }
@@ -157,12 +210,14 @@ pub(crate) fn digne_de_confiance(reparse: bool, proprietaire: Proprietaire) -> b
     !reparse && matches!(proprietaire, Proprietaire::Systeme | Proprietaire::Administrateurs)
 }
 
+#[cfg(windows)]
 fn est_reparse(p: &std::path::Path) -> bool {
     use std::os::windows::fs::MetadataExt;
     // FILE_ATTRIBUTE_REPARSE_POINT; unreadable counts as untrusted.
     std::fs::symlink_metadata(p).map(|m| m.file_attributes() & 0x400 != 0).unwrap_or(true)
 }
 
+#[cfg(windows)]
 fn proprietaire(p: &std::path::Path) -> Proprietaire {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
@@ -193,23 +248,28 @@ fn proprietaire(p: &std::path::Path) -> Proprietaire {
     resultat
 }
 
+#[cfg(windows)]
 pub(crate) fn fiable(p: &std::path::Path) -> bool {
     digne_de_confiance(est_reparse(p), proprietaire(p))
 }
 
-/// The state's folders and file, from the top, all trusted.
-fn etat_fiable() -> bool {
-    let (Some(d), Some(p)) = (dossier(), chemin()) else {
-        return false;
-    };
-    d.parent().is_some_and(fiable) && fiable(&d) && fiable(&p)
+/// One level of the trust check (shared with the connection log): absent, trusted, or anything else.
+#[cfg(windows)]
+pub(crate) fn niveau(p: &std::path::Path) -> Niveau {
+    match std::fs::symlink_metadata(p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Niveau::Absent,
+        Ok(_) if fiable(p) => Niveau::Fiable,
+        _ => Niveau::Douteux,
+    }
 }
 
+#[cfg(windows)]
 /// The two folder levels (`InformaTech`, then `OPMD`), trusted, without touching anything.
 fn dossiers_fiables(d: &std::path::Path) -> bool {
     d.parent().is_some_and(fiable) && fiable(d)
 }
 
+#[cfg(windows)]
 /// A Windows tool by its full System32 path, asked to Windows itself: no PATH search, no environment variable a
 /// user could set, no shell (Scylla 17/11).
 pub(crate) fn systeme32(programme: &str) -> Option<PathBuf> {
@@ -224,6 +284,7 @@ pub(crate) fn systeme32(programme: &str) -> Option<PathBuf> {
     Some(PathBuf::from(std::ffi::OsString::from_wide(&tampon[..n])).join(programme))
 }
 
+#[cfg(windows)]
 /// Runs a Windows tool (`icacls.exe`: file name with its extension) from System32.
 pub(crate) fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
     let Some(exe) = systeme32(programme) else {
@@ -237,27 +298,35 @@ pub(crate) fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+#[cfg(windows)]
 /// Elevated writer only (`--informatech-rotation`): each missing level (`InformaTech`, then `OPMD`) is created closed
 /// (owner Administrators, SYSTEM and Administrators only, nothing inherited, in the same call); a level that exists
 /// must already be trusted, and gets the same DACL again. Never takes a folder over (no takeown), never removes one:
 /// an untrusted level refuses the whole configuration (Scylla 17/11). Only paths go on the command lines, never a
 /// secret.
+/// The decision is `informatech_journal::plan` on the three levels, taken BEFORE anything is created: one untrusted
+/// level (a state file planted under the name included) refuses with nothing touched, and the service then publishes
+/// `hors-service` (`publication`, same rule).
 fn proteger(d: &std::path::Path) -> ResultType<()> {
-    let niveaux = [d.parent().map(|x| x.to_path_buf()), Some(d.to_path_buf())];
-    for n in niveaux.into_iter().flatten() {
-        match std::fs::symlink_metadata(&n) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => creer_dossier_ferme(&n, "BA", false)?,
-            Err(e) => return Err(e.into()),
-            Ok(_) => {}
+    let Some(parent) = d.parent() else {
+        hbb_common::anyhow::bail!("state folder not trusted");
+    };
+    let Plan::Ecrire { creer_parent, creer_dossier } = plan(niveau(parent), niveau(d), niveau(&d.join(FICHIER))) else {
+        hbb_common::anyhow::bail!("state folder not trusted");
+    };
+    for (n, creer) in [(parent, creer_parent), (d, creer_dossier)] {
+        if creer {
+            creer_dossier_ferme(n, "BA", false)?;
         }
-        if !fiable(&n) {
+        if !fiable(n) {
             hbb_common::anyhow::bail!("state folder not trusted");
         }
-        poser_dacl(&n, false)?;
+        poser_dacl(n, false)?;
     }
     Ok(())
 }
 
+#[cfg(windows)]
 /// Creates ONE folder (never its parents) with the security descriptor of `sddl_dossier`, in one call: the folder never
 /// exists with ProgramData's inherited rights (Scylla 17/11). Fails if the name already exists.
 pub(crate) fn creer_dossier_ferme(p: &std::path::Path, proprietaire: &str, lecture_utilisateurs: bool) -> ResultType<()> {
@@ -285,6 +354,7 @@ pub(crate) fn creer_dossier_ferme(p: &std::path::Path, proprietaire: &str, lectu
     Ok(())
 }
 
+#[cfg(windows)]
 /// THE closed DACL of InformaTech's machine folders, in one place (Scylla 17/11: the connection log's parent gets the
 /// same two entries as this writer's, from one function): SYSTEM and Administrators full, nothing inherited.
 /// `lecture_utilisateurs` adds ONE entry, read + execute for BUILTIN\Users: only the folder of the connection log
@@ -308,19 +378,53 @@ pub(crate) fn poser_dacl(n: &std::path::Path, lecture_utilisateurs: bool) -> Res
     Ok(())
 }
 
-fn lire() -> Option<Etat> {
-    let p = chemin()?;
-    if std::fs::symlink_metadata(&p).is_err() {
-        return None;
-    }
-    if !etat_fiable() {
-        journal("state file ignored: folder or file not owned by SYSTEM/Administrators, or a link");
-        return None;
-    }
-    let texte = std::fs::read_to_string(&p).ok()?;
-    serde_json::from_str(&texte).ok()
+/// What the service sees, without touching anything: the three levels, and the state when all three are trusted
+/// and the file reads as one. (None, None) when Windows gives no system directory.
+#[cfg(windows)]
+fn regarder() -> (Option<(Niveau, Niveau, Niveau)>, Option<Etat>) {
+    let Some((d, p)) = dossier().zip(chemin()) else {
+        return (None, None);
+    };
+    let Some(parent) = d.parent() else {
+        return (None, None);
+    };
+    let niveaux = (niveau(parent), niveau(&d), niveau(&p));
+    let etat = if niveaux == (Niveau::Fiable, Niveau::Fiable, Niveau::Fiable) {
+        std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(&t).ok())
+    } else {
+        None
+    };
+    (Some(niveaux), etat)
 }
 
+/// Publishes the state for the client's Hub, at start and on a change only. Same rights as the connection log's key
+/// (informatech_journal.rs): created by this SYSTEM service under HKLM\SOFTWARE, inherited rights, so a standard user
+/// reads it and cannot forge « actif ». Not configured: the key is removed.
+#[cfg(windows)]
+fn publier(p: Publication) {
+    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let ecrit = match mot_publie(p) {
+        Some(mot) => hklm.create_subkey(CLE_ETAT).and_then(|(cle, _)| {
+            cle.set_value("etat", &mot)?;
+            cle.set_value("t", &maintenant())
+        }),
+        None => match hklm.delete_subkey(CLE_ETAT) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            r => r,
+        },
+    };
+    if ecrit.is_err() {
+        journal("the state of the rotation could not be published");
+    }
+    journal(match p {
+        Publication::HorsService => "rotation off on this PC: a state folder is not trusted, or the state cannot be read",
+        Publication::Actif => "rotation on",
+        Publication::NonConfiguree => "rotation not configured",
+    });
+}
+
+#[cfg(windows)]
 /// Elevated configuration (`--informatech-rotation`): the folders are created closed or must already be trusted,
 /// then the state file is written.
 fn configurer(e: &Etat) -> ResultType<()> {
@@ -331,6 +435,7 @@ fn configurer(e: &Etat) -> ResultType<()> {
     ecrire(e)
 }
 
+#[cfg(windows)]
 /// The state file, written in place by the elevated command or by the SYSTEM service (Scylla 17/11: the service
 /// never creates, takes over or cleans a folder). Only into trusted folders: a brand-new temporary file next to the
 /// state file, then renamed over it. The only thing ever removed is a leftover of that temporary file, one plain
@@ -363,6 +468,7 @@ pub(crate) fn ecrire_neuf(p: &std::path::Path, octets: &[u8]) -> ResultType<()> 
     Ok(())
 }
 
+#[cfg(windows)]
 fn effacer_fichier() {
     if let Some(p) = chemin() {
         let _ = std::fs::remove_file(p);
@@ -391,8 +497,10 @@ pub(crate) trait Effets {
     fn poster(&mut self, url: &str, jeton: &str, mot_de_passe: &str) -> Option<u16>;
 }
 
+#[cfg(windows)]
 struct Reels;
 
+#[cfg(windows)]
 impl Effets for Reels {
     fn appliquer(&mut self, mot_de_passe: &str) -> bool {
         Config::set_permanent_password(mot_de_passe)
@@ -466,6 +574,7 @@ pub(crate) fn pas(etat: Etat, action: Action, maintenant: u64, effets: &mut impl
     }
 }
 
+#[cfg(windows)]
 /// `--informatech-rotation [--effacer]` (elevated, installed). Reads the configuration from stdin. On failure: the
 /// exit code (Scylla 17/11: the elevated caller reads nothing else) and a fixed sentence: 2 the input is refused,
 /// 3 the state cannot be written (an untrusted folder included).
@@ -481,12 +590,15 @@ pub fn commande(args: &[String]) -> Result<(), (i32, &'static str)> {
     Ok(())
 }
 
-/// Started once in the `--server` process: rotates at start, then watches connection ends and retries.
+/// Started once in the `--server` process: rotates at start, then watches connection ends and retries. Publishes the
+/// rotation's state at start and whenever it changes (never every 15 seconds, and its log line goes with it).
+#[cfg(windows)]
 pub fn demarrer(nb_connexions: fn() -> usize) {
     std::thread::spawn(move || {
         let mut demarrage = true;
         let mut avant = nb_connexions();
         let mut fin_derniere: Option<u64> = None;
+        let mut publie: Option<Publication> = None;
         loop {
             let n = nb_connexions();
             let t = maintenant();
@@ -496,7 +608,13 @@ pub fn demarrer(nb_connexions: fn() -> usize) {
                 fin_derniere = Some(t);
             }
             avant = n;
-            if let Some(e) = lire() {
+            let (niveaux, lu) = regarder();
+            let p = publication(niveaux, lu.is_some());
+            if publie != Some(p) {
+                publier(p);
+                publie = Some(p);
+            }
+            if let Some(e) = lu {
                 let action = decider(&e, n, fin_derniere, t, demarrage);
                 if action != Action::Rien {
                     if action == Action::Tourner {
@@ -633,6 +751,7 @@ mod tests {
         assert!(!digne_de_confiance(true, Administrateurs));
     }
 
+    #[cfg(windows)]
     #[test]
     fn proprietaires_reels() {
         // ProgramData belongs to SYSTEM; a folder the test user creates belongs to that user.
@@ -662,6 +781,7 @@ mod tests {
     }
 
     /// Scylla 17/11: a folder a user created is never taken over, nor written into, and nothing in it is removed.
+    #[cfg(windows)]
     #[test]
     fn un_dossier_cree_par_un_utilisateur_n_est_jamais_repris() {
         let d = std::env::temp_dir().join(format!("a12-utilisateur-{}", std::process::id()));
@@ -671,6 +791,52 @@ mod tests {
         assert!(proteger(&d.join("OPMD")).is_err());
         assert!(d.join("OPMD").join("dedans").join("x").is_file());
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Scylla 17/11 (b): the refused-level case, on the pure part. Wherever the elevated writer refuses (exit 3:
+    /// `plan` says Passer), the service publishes `hors-service`: never a silent skip.
+    #[test]
+    fn un_niveau_refuse_se_voit_hors_service() {
+        use Niveau::*;
+        let tous = [Absent, Fiable, Douteux];
+        for p in tous {
+            for d in tous {
+                for f in tous {
+                    let refuse = plan(p, d, f) == Plan::Passer;
+                    for lisible in [true, false] {
+                        let publie = publication(Some((p, d, f)), lisible);
+                        if refuse {
+                            assert_eq!(publie, Publication::HorsService, "{p:?} {d:?} {f:?}: exit 3 must be visible");
+                        }
+                        if publie == Publication::Actif {
+                            assert!(!refuse && f == Fiable && lisible, "{p:?} {d:?} {f:?}");
+                        }
+                    }
+                }
+            }
+        }
+        // The real case for Chopper's list: `InformaTech` pre-created by a standard user, nothing configured yet.
+        assert_eq!(publication(Some((Douteux, Absent, Absent)), false), Publication::HorsService);
+        // `OPMD` pre-created by a user, or a junction; a state file planted under the name.
+        assert_eq!(publication(Some((Fiable, Douteux, Absent)), false), Publication::HorsService);
+        assert_eq!(publication(Some((Fiable, Fiable, Douteux)), false), Publication::HorsService);
+        // No system directory: rotation cannot run.
+        assert_eq!(publication(None, false), Publication::HorsService);
+        // Trusted and readable: on. Trusted but unreadable: off. Nothing on disk: not configured (key removed).
+        assert_eq!(publication(Some((Fiable, Fiable, Fiable)), true), Publication::Actif);
+        assert_eq!(publication(Some((Fiable, Fiable, Fiable)), false), Publication::HorsService);
+        assert_eq!(publication(Some((Absent, Absent, Absent)), false), Publication::NonConfiguree);
+        assert_eq!(publication(Some((Fiable, Absent, Absent)), false), Publication::NonConfiguree);
+        assert_eq!(publication(Some((Fiable, Fiable, Absent)), false), Publication::NonConfiguree);
+    }
+
+    /// The key and the words the Hub reads (Zoro), pinned.
+    #[test]
+    fn l_etat_publie_est_fixe() {
+        assert_eq!(CLE_ETAT, r"SOFTWARE\InformaTech\OPMD-rotation");
+        assert_eq!(mot_publie(Publication::Actif), Some("actif"));
+        assert_eq!(mot_publie(Publication::HorsService), Some("hors-service"));
+        assert_eq!(mot_publie(Publication::NonConfiguree), None);
     }
 
     #[test]

@@ -8,8 +8,8 @@ pub use platform::{
     clip_cursor, get_cursor, get_cursor_data, get_cursor_pos, get_focused_display,
     set_cursor_pos, start_os_service,
 };
-/// InformaTech (A12): the service rotates its permanent password after each session.
-#[cfg(windows)]
+/// InformaTech (A12): the service rotates its permanent password after each session. Compiled everywhere (its
+/// decisions are tested on any host); everything that touches Windows in it is `cfg(windows)`.
 pub mod informatech_rotation;
 /// InformaTech (S-076 C): the service logs every authorized incoming connection for the client's Hub. Compiled
 /// everywhere (its file format is tested on any host); it only runs in the Windows service.
