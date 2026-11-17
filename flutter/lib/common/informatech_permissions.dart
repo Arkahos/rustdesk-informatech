@@ -10,8 +10,8 @@ const Map<String, String> kInformatechBasculesRefusables = {
   'recording': 'enable-record-session',
 };
 
-/// The line shown on a refused switch (wording to confirm with Styx).
-const String kInformatechRefusBascule = 'Désactivé sur ce poste par InformaTech';
+/// The line shown on a refused switch (Styx 18/11: « ordinateur », not the jargon « poste »).
+const String kInformatechRefusBascule = 'Désactivé par InformaTech sur cet ordinateur';
 
 /// The reason to show on switch `nom`, or null when the client may use it. `option` reads an engine option
 /// (`bind.mainGetOptionSync`); only the kinds above can be refused here, so a client who turned the keyboard off
