@@ -2540,6 +2540,36 @@ pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
 /// file of unknown origin to the video parser).
 pub(crate) const INFORMATECH_REFUS_LECTURE: &str = "refused: this build records nothing and plays no recording";
 
+/// S-078 (Scylla 17/11): `--connect <id>` takes an OPMD id, 6 to 16 digits, nothing else.
+pub(crate) const INFORMATECH_REFUS_IDENTIFIANT: &str = "refused: the id is 6 to 16 digits";
+
+pub(crate) fn informatech_identifiant_valide(id: &str) -> bool {
+    (6..=16).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// S-078 (Scylla 17/11, point 5): the pieces of the RAW command line, cut at every space, tab and double quote. Two
+/// parsers read the same Windows command line differently (Rust's std and CommandLineToArgvW disagree on `""` inside
+/// quotes: `"x"" --password y` is one argument for one and three for the other), so the start-up refusal also looks
+/// at every piece any quoting could make an argument of. Pure, for the tests.
+pub(crate) fn informatech_morceaux_de_la_ligne(ligne: &str) -> Vec<String> {
+    ligne.split(|c: char| c == '"' || c.is_whitespace()).filter(|m| !m.is_empty()).map(str::to_owned).collect()
+}
+
+/// What `informatech_refus_au_demarrage` is asked about: the arguments as Rust reads them, and on Windows also the
+/// pieces of the raw command line (`informatech_morceaux_de_la_ligne`).
+pub(crate) fn informatech_ligne_a_verifier() -> Vec<String> {
+    #[allow(unused_mut)]
+    let mut ligne: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(windows)]
+    {
+        // SAFETY: GetCommandLineW returns a pointer to this process's command line, valid for its whole life.
+        if let Ok(brute) = unsafe { windows::Win32::System::Environment::GetCommandLineW().to_string() } {
+            ligne.extend(informatech_morceaux_de_la_ligne(&brute));
+        }
+    }
+    ligne
+}
+
 /// S-078 (Scylla 17/11): the window that would receive the password link is not one of this program's.
 pub(crate) const INFORMATECH_REFUS_FENETRE_ETRANGERE: &str =
     "refused: a window of this name belongs to another program; nothing was sent";
@@ -2689,6 +2719,11 @@ pub(crate) fn informatech_lien_de_connexion(
     }
     if informatech_lien_avec_mot_de_passe(&lien, prefixe) {
         return Err(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
+    }
+    // Scylla 17/11 (point 6): digits only, as the phone's ConnexionActivity takes them. Anything else could make the
+    // window's link parser fail, and a failing parser is one more place a link with its password could be printed.
+    if !informatech_identifiant_valide(id) {
+        return Err(INFORMATECH_REFUS_IDENTIFIANT);
     }
     if let Some(secret) = secret {
         lien.push(if parametres.is_empty() { '?' } else { '&' });
@@ -3733,7 +3768,7 @@ mod tests {
         );
         // Whatever stdin gave comes out of one percent-decoding unchanged, and never splits the link.
         let secret = "a&b=c #%+é/?;\\\"'";
-        let lien = informatech_lien_de_connexion(p, "connect", "1", &[], Some(secret)).unwrap();
+        let lien = informatech_lien_de_connexion(p, "connect", "123456789", &[], Some(secret)).unwrap();
         let (_, code) = lien.split_once("?password=").unwrap();
         assert!(code.bytes().all(|o| o.is_ascii_alphanumeric() || b"-._~%".contains(&o)), "{code}");
         assert_eq!(informatech_decoder_pourcent(code), secret);
@@ -3758,6 +3793,43 @@ mod tests {
                 );
             }
         }
+        // Point 6: the id is 6 to 16 digits, nothing else (a link parser that fails on it may print the link).
+        for mauvais in ["", "12345", "12345678901234567", "12345a789", "123 456 789", "１２３４５６", "123456789@srv", "123456789/r", "-123456"] {
+            assert_eq!(informatech_lien_de_connexion(p, "connect", mauvais, &[], Some("s")), Err(INFORMATECH_REFUS_IDENTIFIANT), "{mauvais}");
+        }
+        for bon in ["123456", "1234567890123456"] {
+            assert!(informatech_lien_de_connexion(p, "connect", bon, &[], Some("s")).is_ok(), "{bon}");
+        }
+    }
+
+    /// Point 5: what Rust's argv and CommandLineToArgvW may cut differently is cut every way at once.
+    #[test]
+    fn informatech_s078_raw_command_line_is_read_every_way() {
+        let p = "informatech://";
+        let brute = r#""C:\Program Files\InformaTech\InformaTech.exe" --connect 123456789 "x"" --password y"#;
+        let morceaux = informatech_morceaux_de_la_ligne(brute);
+        assert!(morceaux.iter().any(|m| m == "--password"), "{morceaux:?}");
+        // Rust's own reading of that line gives one argument `x" --password y`, which the option rule alone misses...
+        let rust = vec!["--connect".to_owned(), "123456789".to_owned(), "x\" --password y".to_owned()];
+        assert_eq!(informatech_refus_au_demarrage(&rust, p), None);
+        // ... and the pieces of the raw line catch it.
+        let mut tout = rust.clone();
+        tout.extend(morceaux);
+        assert_eq!(informatech_refus_au_demarrage(&tout, p), Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV));
+        // A link hidden behind quotes, and the Hub's own commands, read the same way.
+        let lien = informatech_morceaux_de_la_ligne(r#"exe "a""informatech://connect/123456789?password=x"#);
+        assert_eq!(informatech_refus_au_demarrage(&lien, p), Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV));
+        for hub in [
+            r#""C:\Program Files\InformaTech\InformaTech.exe" --password-stdin"#,
+            r#""C:\Program Files\InformaTech\InformaTech.exe" --connect 123456789 --password-stdin"#,
+            r#""C:\Program Files\InformaTech\InformaTech.exe" --get-id"#,
+            r#""C:\Program Files\InformaTech\InformaTech.exe" --option "verification-method" "use-permanent-password""#,
+            r#"C:\Users\x\Downloads\OPMD-0.1.2-x86_64.exe --silent-install"#,
+        ] {
+            assert_eq!(informatech_refus_au_demarrage(&informatech_morceaux_de_la_ligne(hub), p), None, "{hub}");
+        }
+        assert!(informatech_morceaux_de_la_ligne("").is_empty());
+        assert_eq!(informatech_morceaux_de_la_ligne(" a\t\"b\"\"c\" "), vec!["a", "b", "c"]);
     }
 
     #[test]

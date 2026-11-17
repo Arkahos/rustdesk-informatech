@@ -908,7 +908,8 @@ Future<void> informatechPrendreConnexion() async {
 
 void androidChannelInit() {
   gFFI.setMethodCallHandler((method, arguments) {
-    debugPrint("flutter got android msg,$method,$arguments");
+    // InformaTech (S-078): the method only, never its arguments.
+    debugPrint("flutter got android msg,$method");
     try {
       switch (method) {
         case "start_capture":

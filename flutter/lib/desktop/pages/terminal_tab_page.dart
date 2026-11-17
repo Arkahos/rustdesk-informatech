@@ -502,8 +502,9 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
 
     rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
+      // InformaTech (S-078, Scylla 17/11): never the arguments, a session window gets the password in them.
       print(
-          "[Remote Terminal] call ${call.method} with args ${call.arguments} from window $fromWindowId");
+          "[Remote Terminal] call ${call.method} from window $fromWindowId");
       if (call.method == kWindowEventNewTerminal) {
         final args = jsonDecode(call.arguments);
         final id = args['id'];

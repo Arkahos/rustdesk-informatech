@@ -40,7 +40,9 @@ Future<void> main(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
-  debugPrint("launch args: $args");
+  // InformaTech (S-078, Scylla 17/11): the arguments are never printed: a session window gets the password in its
+  // JSON argument (multi_window_manager.dart), and debugPrint reaches stdout in release builds too.
+  debugPrint("launch args: ${args.length}");
   kBootArgs = List.from(args);
 
   if (!isDesktop) {

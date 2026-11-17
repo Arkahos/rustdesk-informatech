@@ -421,8 +421,9 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       RemoteCountState.find().value = tabController.length;
 
   Future<dynamic> _remoteMethodHandler(call, fromWindowId) async {
+    // InformaTech (S-078, Scylla 17/11): never the arguments, a session window gets the password in them.
     debugPrint(
-        "[Remote Page] call ${call.method} with args ${call.arguments} from window $fromWindowId");
+        "[Remote Page] call ${call.method} from window $fromWindowId");
 
     dynamic returnValue;
     // for simplify, just replace connectionId

@@ -57,8 +57,9 @@ class _PortForwardTabPageState extends State<PortForwardTabPage> {
     super.initState();
 
     rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
+      // InformaTech (S-078, Scylla 17/11): never the arguments, a session window gets the password in them.
       debugPrint(
-          "[Port Forward] call ${call.method} with args ${call.arguments} from window $fromWindowId");
+          "[Port Forward] call ${call.method} from window $fromWindowId");
       // for simplify, just replace connectionId
       if (call.method == kWindowEventNewPortForward) {
         final args = jsonDecode(call.arguments);

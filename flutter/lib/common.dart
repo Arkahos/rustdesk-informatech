@@ -2198,7 +2198,8 @@ Future<bool> initUniLinks() async {
   try {
     final initialLink = await getInitialLink();
     // InformaTech (S-078, Argos P4): a link is never printed, it may hold a password.
-    print("initialLink: ${initialLink == null || initialLink.isEmpty ? 'none' : 'received'}");
+    final recu = initialLink == null || initialLink.isEmpty ? 'none' : 'received';
+    print("initialLink: $recu");
     if (initialLink == null || initialLink.isEmpty) {
       return false;
     }
@@ -2242,7 +2243,8 @@ StreamSubscription? listenUniLinks({handleByFlutter = true}) {
       print("uni listen error: uri is empty.");
     }
   }, onError: (err) {
-    print("uni links error: $err");
+    // InformaTech (S-078, Scylla 17/11): the error may quote the link, password included: never printed.
+    print("uni links error");
   });
   return sub;
 }
@@ -2337,9 +2339,10 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         i++;
         break;
       case '--password':
-        password = args[i + 1];
-        i++;
-        break;
+        // InformaTech (S-078, Scylla 17/11): a password on the command line is never taken, even where the engine's
+        // parser (Rust argv) and this one (CommandLineToArgvW) cut the line differently. The session does not start.
+        print("refused: the password is never given on the command line");
+        return false;
       case '--password-stdin':
         // InformaTech (S-078): the engine read the password from stdin (never from the command line) and hands it
         // over once. A `--password <value>` on the real command line never gets here: the engine exits first.

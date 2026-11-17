@@ -66,8 +66,9 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
     super.initState();
 
     rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
+      // InformaTech (S-078, Scylla 17/11): never the arguments, a session window gets the password in them.
       debugPrint(
-          "[FileTransfer] call ${call.method} with args ${call.arguments} from window $fromWindowId to ${windowId()}");
+          "[FileTransfer] call ${call.method} from window $fromWindowId to ${windowId()}");
       // for simplify, just replace connectionId
       if (call.method == kWindowEventNewFileTransfer) {
         final args = jsonDecode(call.arguments);

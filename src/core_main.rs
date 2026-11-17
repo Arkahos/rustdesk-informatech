@@ -39,7 +39,7 @@ pub fn core_main() -> Option<Vec<String>> {
     // reads, forwards or logs an argument: the Windows runner dispatches to a running window only after this function
     // returned (flutter/windows/runner/main.cpp), and `core_main_invoke_new_connection` runs further down.
     if let Some(refus) = crate::common::informatech_refus_au_demarrage(
-        &std::env::args().skip(1).collect::<Vec<_>>(),
+        &crate::common::informatech_ligne_a_verifier(),
         &crate::get_uri_prefix(),
     ) {
         println!("{refus}");
@@ -1012,9 +1012,11 @@ mod tests {
         let refus = place(moteur, "if let Some(refus) = crate::common::informatech_refus_au_demarrage(");
         let sortie = place(moteur, "std::process::exit(2);");
         assert!(entree < refus && refus < sortie);
-        // The first read of the command line in the file is the refusal's own argument.
-        let lecture = place(moteur, "std::env::args()");
+        // The refusal reads the command line itself (Rust's argv and, on Windows, the raw line); nothing in this
+        // file reads it before the exit.
+        let lecture = place(moteur, "crate::common::informatech_ligne_a_verifier()");
         assert!(refus < lecture && lecture < sortie);
+        assert!(sortie < place(moteur, "std::env::args()"));
         for apres in [
             "crate::platform::windows::bootstrap()",
             "for arg in std::env::args() {",
@@ -1029,6 +1031,62 @@ mod tests {
         let appel = place(lanceur, "rustdesk_core_main(&args_len)");
         assert!(appel < place(lanceur, "::FindWindowW("));
         assert!(appel < place(lanceur, "DispatchToUniLinksDesktop(hwnd);"));
+    }
+
+    /// S-078 (Scylla 17/11): the viewer never prints what may hold the password: a session window's launch arguments
+    /// (their JSON carries it), a window message's arguments, a link. debugPrint reaches stdout in release builds.
+    /// Reads every Dart file of flutter/lib: each `print(` / `debugPrint(` call, to its closing parenthesis, must not
+    /// name one of those. A name outside this list (an alias of the arguments) is beyond this check.
+    #[test]
+    fn informatech_s078_viewer_never_prints_its_arguments() {
+        const INTERDITS: &[&str] = &[
+            "call.arguments", "$args", "${args", "$arguments", "${arguments", "kBootArgs", "$cmdArgs", "${cmdArgs", "$uri",
+            "${uri", "$link", "${link", "$initialLink", "${initialLink", "$url", "${url",
+        ];
+        fn fichiers(d: &std::path::Path, sortie: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    fichiers(&p, sortie);
+                } else if p.extension().is_some_and(|x| x == "dart") {
+                    sortie.push(p);
+                }
+            }
+        }
+        let mut dart = Vec::new();
+        fichiers(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("flutter").join("lib"), &mut dart);
+        assert!(dart.len() > 100, "flutter/lib not found or nearly empty");
+        let mut fautes = Vec::new();
+        for p in &dart {
+            // The generated bridge has no print of ours, and is not always generated where the tests run.
+            if p.to_string_lossy().contains("generated_bridge") {
+                continue;
+            }
+            let s = std::fs::read_to_string(p).unwrap_or_default();
+            let mut i = 0;
+            while let Some(k) = s[i..].find("print(") {
+                let debut = i + k;
+                let mut j = debut + "print(".len();
+                let mut profondeur = 1;
+                for (n, c) in s[j..].char_indices() {
+                    profondeur += match c {
+                        '(' => 1,
+                        ')' => -1,
+                        _ => 0,
+                    };
+                    if profondeur == 0 {
+                        j += n + 1;
+                        break;
+                    }
+                }
+                let appel = &s[debut..j.max(debut + "print(".len()).min(s.len())];
+                if let Some(t) = INTERDITS.iter().find(|t| appel.contains(*t)) {
+                    fautes.push(format!("{}:{} names {t}", p.display(), s[..debut].lines().count()));
+                }
+                i = j.max(debut + 1);
+            }
+        }
+        assert!(fautes.is_empty(), "the viewer prints what may hold the password:\n{}", fautes.join("\n"));
     }
 
     #[test]
