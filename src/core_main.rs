@@ -34,6 +34,17 @@ pub fn core_main() -> Option<Vec<String>> {
         return None;
     }
     crate::load_custom_client();
+    // InformaTech (S-078, Scylla 17/11): the first thing done with the command line. A password on it in any form (an
+    // old option, a link of ours naming one) and `--play` end the process here with exit code 2, before anything
+    // reads, forwards or logs an argument: the Windows runner dispatches to a running window only after this function
+    // returned (flutter/windows/runner/main.cpp), and `core_main_invoke_new_connection` runs further down.
+    if let Some(refus) = crate::common::informatech_refus_au_demarrage(
+        &std::env::args().skip(1).collect::<Vec<_>>(),
+        &crate::get_uri_prefix(),
+    ) {
+        println!("{refus}");
+        std::process::exit(2);
+    }
     #[cfg(windows)]
     if !crate::platform::windows::bootstrap() {
         // return None to terminate the process
@@ -79,17 +90,6 @@ pub fn core_main() -> Option<Vec<String>> {
             }
         }
         i += 1;
-    }
-    // InformaTech (S-078, Argos P3 and Scylla 17/11): a link given on the command line never carries a password
-    // either (`<exe> <scheme>://connect/<id>?password=…`). Refused here, before anything reads or forwards it, with the
-    // same sentence and exit code as `--password <value>`.
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    if std::env::args()
-        .skip(1)
-        .any(|a| crate::common::informatech_lien_avec_mot_de_passe(&a, &crate::get_uri_prefix()))
-    {
-        println!("{}", crate::common::INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
-        std::process::exit(2);
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if args.is_empty() {
@@ -820,6 +820,8 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     let mut authority = None;
     let mut id = None;
     let mut param_array = vec![];
+    // InformaTech (S-078): the password read from stdin, kept apart from what the arguments give.
+    let mut secret: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--connect" | "--play" | "--file-transfer" | "--view-camera" | "--port-forward"
@@ -834,7 +836,7 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
                     // For a window that already runs (sent over the in-process link below), and for this process's
                     // own Flutter side when it is the first window (taken once through the bridge).
                     crate::common::informatech_deposer_secret_connexion(password.clone());
-                    param_array.push(format!("password={password}"));
+                    secret = Some(password);
                 }
                 Err(refus) => {
                     println!("{refus}");
@@ -865,16 +867,21 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
             if id.ends_with(&ext) {
                 id = id.replace(&ext, "");
             }
-            let params = param_array.join("&");
-            let params_flag = if params.is_empty() { "" } else { "?" };
-            uni_links = format!(
-                "{}{}/{}{}{}",
-                crate::get_uri_prefix(),
-                authority,
-                id,
-                params_flag,
-                params
-            );
+            // InformaTech (S-078, Scylla 17/11): the password of this link comes from stdin only; an id or a
+            // parameter given as an argument that names one is refused.
+            uni_links = match crate::common::informatech_lien_de_connexion(
+                &crate::get_uri_prefix(),
+                &authority,
+                &id,
+                &param_array,
+                secret.as_deref(),
+            ) {
+                Ok(lien) => lien,
+                Err(refus) => {
+                    println!("{refus}");
+                    std::process::exit(2);
+                }
+            };
         }
     }
     if uni_links.is_empty() {
@@ -981,6 +988,38 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+
+    /// S-078 (Scylla 17/11, condition c): a second « <exe> <link with password> » exits 2 before anything is forwarded.
+    /// The decision itself is `common::informatech_refus_au_demarrage` (tested there); this pins WHERE it is taken:
+    /// first in `core_main`, before any other read of the command line, and before the two places that hand a command
+    /// line to a window that already runs (`core_main_invoke_new_connection` here, the uni-links dispatch of the
+    /// Windows runner, which calls the engine first). The same on a real process is owed on the Windows build.
+    #[test]
+    fn informatech_s078_refusal_comes_before_any_forwarding() {
+        let place = |source: &str, quoi: &str| source.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let moteur = include_str!("core_main.rs");
+        let entree = place(moteur, "pub fn core_main() -> Option<Vec<String>> {");
+        let refus = place(moteur, "if let Some(refus) = crate::common::informatech_refus_au_demarrage(");
+        let sortie = place(moteur, "std::process::exit(2);");
+        assert!(entree < refus && refus < sortie);
+        // The first read of the command line in the file is the refusal's own argument.
+        let lecture = place(moteur, "std::env::args()");
+        assert!(refus < lecture && lecture < sortie);
+        for apres in [
+            "crate::platform::windows::bootstrap()",
+            "for arg in std::env::args() {",
+            "return core_main_invoke_new_connection(std::env::args());",
+            "crate::platform::send_message_to_hnwd(",
+            "crate::ipc::send_url_scheme(uni_links)",
+            "try_send_by_dbus(uni_links)",
+        ] {
+            assert!(sortie < place(moteur, apres), "{apres}");
+        }
+        let lanceur = include_str!("../flutter/windows/runner/main.cpp");
+        let appel = place(lanceur, "rustdesk_core_main(&args_len)");
+        assert!(appel < place(lanceur, "::FindWindowW("));
+        assert!(appel < place(lanceur, "DispatchToUniLinksDesktop(hwnd);"));
     }
 
     #[test]

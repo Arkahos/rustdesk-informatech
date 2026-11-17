@@ -50,7 +50,6 @@
 
 			<ComponentRef Id="Product.Registry.InstallFolder" />
 			<ComponentRef Id="Product.Registry.DefaultIcon" />
-			<ComponentRef Id="Product.Registry.CommandPlay" />
 			<ComponentRef Id="Product.Registry.InstallState" />
 			<ComponentRef Id="Product.Registry.RemoveLegacyUninstall64" />
 			<ComponentRef Id="Product.Registry.RemoveLegacyUninstall32" />

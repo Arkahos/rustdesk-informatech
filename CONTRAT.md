@@ -138,6 +138,25 @@ OPMD-0.1.0-x86_64.exe --silent-install
 "C:\Program Files\InformaTech\InformaTech.exe" --get-id      # -> ID a enregistrer
 ```
 
+> **After OPMD 0.1.1 (not released yet): the table above no longer holds for passwords.** A password is never
+> given on a command line, in any form:
+>
+> | Command | Effect |
+> |---|---|
+> | `--password-stdin` | sets the permanent password read from stdin; exit code 0 only when the service took it |
+> | `--password-random` | sets a random permanent password drawn by the engine |
+> | `--connect <id> --password-stdin` | connects (viewer side) with the password read from stdin |
+>
+> Refused with exit code 2 before anything else runs: `--password <value>` (also `-password`, `/password`, any case,
+> with `=` or `:`), any `<scheme>://…` link naming a password (query, fragment or `<scheme>://password/…`, whatever
+> its case, encoding or splitting over arguments), and `--play` (this build records nothing and plays no recording).
+> The installers register no URL scheme and no file association, and remove those left by an earlier version.
+> `--file-transfer` logins are refused by the client PC.
+>
+> **Platforms**: only the Windows build (engine and viewer) and the Android viewer are built and reviewed. The macOS,
+> Linux and iOS code of the upstream project is still in the tree (for example the macOS `Info.plist` with its URL
+> scheme): it is neither built nor reviewed, and must not be shipped as it is.
+
 ---
 
 ## 6. Comportement de marque et différences constatées

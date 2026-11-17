@@ -35,16 +35,10 @@
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.CommandPlay" Guid="613C9E4F-2F1F-45A3-96E2-26EBBEBA6B0E">
-				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell" />
-				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell\open" />
-				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell\open\command">
-					<RegistryValue Type="string" Value='"[INSTALLFOLDER_INNER]$(var.Product).exe" --play "%1"' />
-				</RegistryKey>
-			</Component>
-
 			<!-- InformaTech (Scylla 17/11, S-078): no URL scheme is registered for the engine: a registered scheme lets any
-			     web page start it with arguments of its choosing. No Hub flow uses a link. -->
+			     web page start it with arguments of its choosing. No Hub flow uses a link.
+			     No file association either (no shell\open\command with "play"): this build records nothing and plays
+			     no recording, a double-clicked file must never reach the video parser. -->
 
 			<Component Id="Product.Registry.InstallState" Guid="E310003A-C292-4851-AE20-7A9B186060CE">
 				<RegistryKey Root="HKLM" Key="Software\$(var.Product)\InstallState\$(var.Product)" ForceDeleteOnUninstall="yes">

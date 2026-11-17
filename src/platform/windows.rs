@@ -1559,6 +1559,10 @@ fn get_after_install(
         })
         .unwrap_or_default();
 
+    // InformaTech (Scylla 17/11): no file association. The `.{ext}` key stays (it only stores the install choices
+    // above and the icon), but no `shell\open\command`: a double-clicked file must never start the engine with
+    // `--play` (this build records nothing and refuses `--play`). One left by an earlier version is removed, like the
+    // URL scheme (`HKCR\{ext}`, S-078).
     format!("
     chcp 65001
     reg add HKEY_CLASSES_ROOT\\.{ext} /f
@@ -1567,10 +1571,7 @@ fn get_after_install(
     {reg_printer}
     reg add HKEY_CLASSES_ROOT\\.{ext}\\DefaultIcon /f
     reg add HKEY_CLASSES_ROOT\\.{ext}\\DefaultIcon /f /ve /t REG_SZ  /d \"\\\"{nested_exe}\\\",0\"
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell /f
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open /f
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open\\command /f
-    reg add HKEY_CLASSES_ROOT\\.{ext}\\shell\\open\\command /f /ve /t REG_SZ /d \"\\\"{nested_exe}\\\" --play \\\"%%1\\\"\"
+    reg delete HKEY_CLASSES_ROOT\\.{ext}\\shell /f
     reg delete HKEY_CLASSES_ROOT\\{ext} /f
     netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=out action=allow program=\"{exe}\" enable=yes
     netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=in action=allow program=\"{exe}\" enable=yes
@@ -2767,8 +2768,8 @@ pub fn send_message_to_hnwd(
         }
         let mut data_struct = COPYDATASTRUCT::default();
         data_struct.dwData = dw_data;
+        // InformaTech (S-078, Scylla 17/11): the data is never printed, it may be a link carrying a password.
         let mut data_zero: String = data.chars().chain(Some('\0').into_iter()).collect();
-        println!("send {:?}", data_zero);
         data_struct.cbData = data_zero.len() as _;
         data_struct.lpData = data_zero.as_mut_ptr() as _;
         SendMessageW(

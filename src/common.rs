@@ -1989,6 +1989,12 @@ pub fn make_empty_dirs_response_to_json(res: &ReadEmptyDirsResponse) -> String {
 pub fn handle_url_scheme(url: String) {
     #[cfg(not(target_os = "ios"))]
     if let Err(err) = crate::ipc::send_url_scheme(url.clone()) {
+        // InformaTech (S-078, Scylla 17/11): a link that names a password is never put on a new process's command
+        // line (that process would refuse it anyway, after the password sat in its arguments). It is dropped.
+        if informatech_lien_avec_mot_de_passe(&url, &get_uri_prefix()) {
+            log::warn!("informatech: a link naming a password could not be handed to a running window, dropped");
+            return;
+        }
         log::debug!("Send the url to the existing flutter process failed, {}. Let's open a new program to handle this.", err);
         let _ = crate::run_me(vec![url]);
     }
@@ -2530,30 +2536,172 @@ pub(crate) fn informatech_prendre_secret_connexion() -> Option<String> {
 pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
     "refused: the password is never given on the command line; use --password-stdin or --password-random";
 
-/// S-078: true when a command-line argument is one of our links (`prefixe` = `<app>://`) that carries a password:
-/// a `password` query parameter (the Dart side lower-cases and percent-decodes the names, so this does too) or the
-/// `<app>://password/<value>` form. Pure, for the tests.
+/// Styx 16/11 and Scylla 17/11: this build makes no recording, so it plays none either (`--play <file>` only fed a
+/// file of unknown origin to the video parser).
+pub(crate) const INFORMATECH_REFUS_LECTURE: &str = "refused: this build records nothing and plays no recording";
+
+/// What one of our links names, read more widely than any URL parser would (see `informatech_lire_lien`).
+struct InformatechLien {
+    /// First path segment: the command (`connect`, `password`, `play`…) or a bare id.
+    commande: String,
+    /// Parameter names of the query and of the fragment.
+    parametres: Vec<String>,
+    /// A name still changed after eight percent-decodings: nothing reads that, it is refused as if it named everything.
+    opaque: bool,
+}
+
+/// Reads `arg` as one of our links (`prefixe` = `<app>://`), None when it is not one. Wider on purpose than the Dart
+/// code that consumes a link (`urlLinkToCmdArgs`: `Uri.parse`, names lower-cased, percent-decoded once): whatever a
+/// URL parser could turn into a name is turned into it here, so no second reading of the same text gets past a
+/// refusal built on this one (Scylla 17/11):
+/// - tabs and line ends are dropped anywhere (WHATWG parsers do), a backslash counts as a slash;
+/// - the scheme matches in any case, with any run of slashes after `scheme:`;
+/// - a name is percent-decoded until it no longer changes (`%2570assword`), `+` is a space, spaces around are trimmed;
+/// - names come from the query AND the fragment, split on `&`, `;`, `?` and `#`.
+/// Names are lower-cased in ASCII: no other letter lower-cases to an ASCII one that matters here (Dart's
+/// `toLowerCase` maps only the Kelvin sign to an ASCII letter, `k`).
+fn informatech_lire_lien(arg: &str, prefixe: &str) -> Option<InformatechLien> {
+    let schema = prefixe.trim_end_matches('/');
+    if schema.is_empty() {
+        return None;
+    }
+    let a: String = arg
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\r' | '\n'))
+        .map(|c| if c == '\\' { '/' } else { c })
+        .collect();
+    let a = a.trim();
+    if !a.get(..schema.len())?.eq_ignore_ascii_case(schema) {
+        return None;
+    }
+    let reste = a[schema.len()..].trim_start_matches('/');
+    let (chemin, suite) = match reste.find(['?', '#']) {
+        Some(i) => (&reste[..i], &reste[i + 1..]),
+        None => (reste, ""),
+    };
+    let mut opaque = false;
+    let mut nom = |brut: &str| {
+        let (decode, stable) = informatech_decoder_a_fond(brut);
+        opaque |= !stable;
+        decode.trim().to_ascii_lowercase()
+    };
+    let commande = nom(chemin.split('/').next().unwrap_or(""));
+    let parametres = suite
+        .split(['&', ';', '?', '#'])
+        .map(|p| nom(p.split('=').next().unwrap_or("")))
+        .collect();
+    Some(InformatechLien { commande, parametres, opaque })
+}
+
+/// S-078: true when a command-line argument is one of our links that names a password: a `password` parameter or the
+/// `<app>://password/<value>` form, in any spelling `informatech_lire_lien` reads. Pure, for the tests.
 pub(crate) fn informatech_lien_avec_mot_de_passe(arg: &str, prefixe: &str) -> bool {
+    informatech_lire_lien(arg, prefixe)
+        .is_some_and(|l| l.opaque || l.commande == "password" || l.parametres.iter().any(|p| p == "password"))
+}
+
+/// True when `arg` is one of our links asking to play a recording (`<app>://play/<file>`).
+fn informatech_lien_de_lecture(arg: &str, prefixe: &str) -> bool {
+    informatech_lire_lien(arg, prefixe).is_some_and(|l| l.opaque || l.commande == "play")
+}
+
+/// `--password`, `-password` or `/password` in any case, alone or with `=value` / `:value` glued on (ruling A, Scylla
+/// 17/11: every old form is refused, whether or not something would still read it). `--password-stdin` and
+/// `--password-random` are other names.
+fn informatech_option_mot_de_passe(arg: &str) -> bool {
     let a = arg.trim();
-    let Some(debut) = a.get(..prefixe.len()) else {
+    let Some(nom) = a.strip_prefix("--").or_else(|| a.strip_prefix('-')).or_else(|| a.strip_prefix('/')) else {
         return false;
     };
-    if !debut.eq_ignore_ascii_case(prefixe) {
+    nom.split(['=', ':']).next().unwrap_or("").eq_ignore_ascii_case("password")
+}
+
+/// Every place of the command line where one of our links starts, read to the end of the line: the arguments glued
+/// together and joined by spaces, so a link split over two arguments or wrapped in quotes is still read whole.
+fn informatech_liens_de_la_ligne(args: &[String], prefixe: &str, refuse: fn(&str, &str) -> bool) -> bool {
+    let schema = prefixe.trim_end_matches('/').to_ascii_lowercase();
+    if schema.is_empty() {
         return false;
     }
-    let reste = &a[prefixe.len()..];
-    let autorite = reste.split(['/', '?', '#']).next().unwrap_or("");
-    if informatech_decoder_pourcent(autorite).eq_ignore_ascii_case("password") {
-        return true;
-    }
-    let Some((_, requete)) = reste.split_once('?') else {
-        return false;
-    };
-    let requete = requete.split('#').next().unwrap_or("");
-    requete.split(['&', ';']).any(|parametre| {
-        let nom = parametre.split('=').next().unwrap_or("");
-        informatech_decoder_pourcent(nom).trim().eq_ignore_ascii_case("password")
+    [args.concat(), args.join(" ")].iter().any(|ligne| {
+        let ligne: String = ligne.chars().filter(|c| !matches!(c, '\t' | '\r' | '\n')).collect();
+        // ASCII lower-casing keeps every byte offset: a match in `bas` is the same place in `ligne`.
+        let bas = ligne.to_ascii_lowercase();
+        let mut depart = 0;
+        while let Some(i) = bas[depart..].find(&schema) {
+            if refuse(&ligne[depart + i..], prefixe) {
+                return true;
+            }
+            depart += i + schema.len();
+        }
+        false
     })
+}
+
+/// S-078 and the no-recording rule: what a command line (without the program name) must never hold, and the sentence
+/// to answer with exit code 2. `core_main` asks this first, before anything reads, forwards or logs an argument:
+/// - a password: an old option form (`--password x`, `-password`, `/password`), or one of our links naming one;
+/// - `--play` or a `play` link, as long as this build records nothing.
+/// Pure, for the tests.
+pub(crate) fn informatech_refus_au_demarrage(args: &[String], prefixe: &str) -> Option<&'static str> {
+    if args.iter().any(|a| informatech_option_mot_de_passe(a))
+        || informatech_liens_de_la_ligne(args, prefixe, informatech_lien_avec_mot_de_passe)
+    {
+        return Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
+    }
+    if INFORMATECH_SANS_CAPTURE
+        && (args.iter().any(|a| a.trim().eq_ignore_ascii_case("--play"))
+            || informatech_liens_de_la_ligne(args, prefixe, informatech_lien_de_lecture))
+    {
+        return Some(INFORMATECH_REFUS_LECTURE);
+    }
+    None
+}
+
+/// S-078 (Scylla 17/11, condition a): the link `--connect <id> --password-stdin` hands to a window that already
+/// runs. Its password comes from the stdin read and from nowhere else: the link is first built from the arguments
+/// alone and refused if those already name a password (an id like `1?password=x`, a crafted switch uuid), then the
+/// secret is added, percent-encoded so the other side reads back exactly what stdin gave.
+pub(crate) fn informatech_lien_de_connexion(
+    prefixe: &str,
+    commande: &str,
+    id: &str,
+    parametres: &[String],
+    secret: Option<&str>,
+) -> Result<String, &'static str> {
+    let mut lien = format!("{prefixe}{commande}/{id}");
+    if !parametres.is_empty() {
+        lien.push('?');
+        lien.push_str(&parametres.join("&"));
+    }
+    if informatech_lien_avec_mot_de_passe(&lien, prefixe) {
+        return Err(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV);
+    }
+    if let Some(secret) = secret {
+        lien.push(if parametres.is_empty() { '?' } else { '&' });
+        lien.push_str("password=");
+        for octet in secret.bytes() {
+            if octet.is_ascii_alphanumeric() || matches!(octet, b'-' | b'.' | b'_' | b'~') {
+                lien.push(octet as char);
+            } else {
+                lien.push_str(&format!("%{octet:02X}"));
+            }
+        }
+    }
+    Ok(lien)
+}
+
+/// Percent-decoded until it no longer changes; false when it still changed after eight rounds.
+fn informatech_decoder_a_fond(s: &str) -> (String, bool) {
+    let mut courant = s.to_owned();
+    for _ in 0..8 {
+        let suivant = informatech_decoder_pourcent(&courant);
+        if suivant == courant {
+            return (courant, true);
+        }
+        courant = suivant;
+    }
+    (courant, false)
 }
 
 /// `%41` → `A`, `+` → space; anything malformed stays as it is.
@@ -3405,6 +3553,32 @@ mod tests {
             " informatech://connect/123456789?password=secret ",
             "informatech://password/secret",
             "informatech://PASS%57ORD/secret",
+            // Scylla's list of 17/11: case, percent-encoding once and several times, `;`, the fragment, the scheme in
+            // capitals, backslashes, a tab or a space inside the link.
+            "informatech://connect/123456789?PassWord=x",
+            "informatech://connect/123456789?%50assword=x",
+            "informatech://connect/123456789?pass%77ord=x",
+            "informatech://connect/123456789?%2570assword=x",
+            "informatech://connect/123456789?%252570assword=x",
+            "informatech://connect/123456789?a=1;password=x",
+            "informatech://connect/123456789#password=x",
+            "informatech://connect/123456789?a=1#b=2&password=x",
+            "informatech://connect/123456789?a=1?password=x",
+            "INFORMATECH://CONNECT/123456789?PASSWORD=X",
+            "informatech:\\\\password\\secret",
+            "informatech:\\\\connect\\123456789?password=x",
+            "informatech:/password/secret",
+            "informatech:password/secret",
+            "informatech:////password/secret",
+            "informatech://connect/123456789?pass\tword=x",
+            "infor\tmatech://connect/123456789?password=x",
+            "informatech://connect/123456789?\r\npassword=x",
+            "informatech://connect/123456789? password =x",
+            "informatech://connect/123456789?+password+=x",
+            "informatech://connect/123456789?%20password=x",
+            "informatech://%20password%20/secret",
+            // Nine encodings deep: nothing reads that, refused all the same.
+            "informatech://connect/1?%25252525252525252570assword=x",
         ] {
             assert!(informatech_lien_avec_mot_de_passe(refuse, p), "{refuse}");
         }
@@ -3412,15 +3586,143 @@ mod tests {
             "informatech://connect/123456789",
             "informatech://connect/123456789?relay=true&key=abc",
             "informatech://connect/123456789?motdepasse=x&passwordx=y&xpassword=z",
-            "informatech://connect/123456789#password=x",
+            "informatech://connect/123456789?pass word=x",
+            "informatech://connect/123456789#relay",
+            "informatech://connect/password",
+            "informatech://connect/123456789?key=password",
             "informatech://",
-            // Not a link of ours: the command-line parser deals with it (`--password <value>` is refused there).
+            "informatech:",
+            // Not a link of ours: `informatech_refus_au_demarrage` deals with the option forms.
             "--password",
             "password=secret",
             "autre://connect/1?password=secret",
             "é",
         ] {
             assert!(!informatech_lien_avec_mot_de_passe(accepte, p), "{accepte}");
+        }
+    }
+
+    #[test]
+    fn informatech_s078_start_up_refuses_every_password_form() {
+        let p = "informatech://";
+        let ligne = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let refuse: &[&[&str]] = &[
+            // Ruling A: the old option forms, wherever they stand and however they are spelled.
+            &["--password", "x"],
+            &["--connect", "123456789", "--password", "x"],
+            &["-password", "x"],
+            &["/password", "x"],
+            &["--PASSWORD", "x"],
+            &["-Password=x"],
+            &["--password=x"],
+            &["/password:x"],
+            &[" --password ", "x"],
+            &["--password"],
+            // A link of ours naming a password, as one argument.
+            &["informatech://connect/123456789?password=x"],
+            &["--connect", "123456789", "informatech://password/x"],
+            // The same link split over two arguments, or wrapped.
+            &["informatech://connect/123456789?relay=true&", "password=x"],
+            &["informatech://connect/123456789?pass", "word=x"],
+            &["informatech://connect/123456789", "?password=x"],
+            &["informatech:", "//password/x"],
+            &["infor", "matech://password/x"],
+            &["\"informatech://connect/123456789?password=x\""],
+            &["--url=informatech://connect/123456789?password=x"],
+            &["informatech://connect/1", "informatech://connect/2?password=x"],
+        ];
+        for r in refuse {
+            assert_eq!(informatech_refus_au_demarrage(&ligne(r), p), Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV), "{r:?}");
+        }
+        let accepte: &[&[&str]] = &[
+            &[],
+            &["--password-stdin"],
+            &["--password-random"],
+            &["--connect", "123456789", "--password-stdin"],
+            &["--connect", "123456789", "--relay"],
+            &["informatech://connect/123456789?relay=true", "--password-stdin"],
+            &["informatech://connect/123456789", "--password-stdin"],
+            &["--server"],
+            &["--option", "password"],
+            &["--address_book_password", "x"],
+            &["password"],
+            &["autre://connect/1?password=x"],
+        ];
+        for a in accepte {
+            assert_eq!(informatech_refus_au_demarrage(&ligne(a), p), None, "{a:?}");
+        }
+    }
+
+    #[test]
+    fn informatech_start_up_refuses_play() {
+        let p = "informatech://";
+        let ligne = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(INFORMATECH_SANS_CAPTURE);
+        let refuse: &[&[&str]] = &[
+            &["--play", "C:\\x.informatech"],
+            &["--PLAY", "x"],
+            &[" --play "],
+            &["informatech://play/x"],
+            &["informatech://PL%41Y/x"],
+            &["informatech:", "//play/x"],
+        ];
+        for r in refuse {
+            assert_eq!(informatech_refus_au_demarrage(&ligne(r), p), Some(INFORMATECH_REFUS_LECTURE), "{r:?}");
+        }
+        // A password on the line is named first.
+        assert_eq!(
+            informatech_refus_au_demarrage(&ligne(&["--play", "x", "--password", "y"]), p),
+            Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV)
+        );
+        let accepte: &[&[&str]] = &[&["--player"], &["--connect", "play"], &["informatech://connect/play"], &["--display", "x"]];
+        for a in accepte {
+            assert_eq!(informatech_refus_au_demarrage(&ligne(a), p), None, "{a:?}");
+        }
+    }
+
+    #[test]
+    fn informatech_s078_forwarded_link_takes_its_password_from_stdin_only() {
+        let p = "informatech://";
+        let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(informatech_lien_de_connexion(p, "connect", "123456789", &[], None).as_deref(), Ok("informatech://connect/123456789"));
+        assert_eq!(
+            informatech_lien_de_connexion(p, "connect", "123456789", &v(&["relay=true"]), None).as_deref(),
+            Ok("informatech://connect/123456789?relay=true")
+        );
+        assert_eq!(
+            informatech_lien_de_connexion(p, "connect", "123456789", &[], Some("aB3-._~")).as_deref(),
+            Ok("informatech://connect/123456789?password=aB3-._~")
+        );
+        assert_eq!(
+            informatech_lien_de_connexion(p, "connect", "123456789", &v(&["relay=true", "switch_uuid=u"]), Some("s")).as_deref(),
+            Ok("informatech://connect/123456789?relay=true&switch_uuid=u&password=s")
+        );
+        // Whatever stdin gave comes out of one percent-decoding unchanged, and never splits the link.
+        let secret = "a&b=c #%+é/?;\\\"'";
+        let lien = informatech_lien_de_connexion(p, "connect", "1", &[], Some(secret)).unwrap();
+        let (_, code) = lien.split_once("?password=").unwrap();
+        assert!(code.bytes().all(|o| o.is_ascii_alphanumeric() || b"-._~%".contains(&o)), "{code}");
+        assert_eq!(informatech_decoder_pourcent(code), secret);
+        // The link that travels in the window message is one a command line would be refused for.
+        assert!(informatech_lien_avec_mot_de_passe(&lien, p));
+        assert_eq!(informatech_refus_au_demarrage(&[lien], p), Some(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV));
+        // An argument can never bring a password into that link (condition a).
+        for (commande, id, parametres) in [
+            ("connect", "1?password=x", v(&[])),
+            ("connect", "1#password=x", v(&[])),
+            ("connect", "1?PASS%57ORD=x", v(&[])),
+            ("connect", "1", v(&["switch_uuid=a&password=x"])),
+            ("connect", "1", v(&["switch_uuid=a;PASSWORD=x"])),
+            ("connect", "1", v(&["relay=true", "switch_uuid=a#password=x"])),
+            ("password", "x", v(&[])),
+        ] {
+            for secret in [None, Some("s")] {
+                assert_eq!(
+                    informatech_lien_de_connexion(p, commande, id, &parametres, secret),
+                    Err(INFORMATECH_REFUS_MOT_DE_PASSE_ARGV),
+                    "{commande} {id} {parametres:?}"
+                );
+            }
         }
     }
 
