@@ -506,21 +506,31 @@ pub fn core_main() -> Option<Vec<String>> {
             // InformaTech (A12): configuration read from stdin (never from the command line), elevated only.
             #[cfg(windows)]
             {
+                // Scylla 17/11: 0 only when the state was written (or cleared); 1 not installed or not elevated,
+                // 2 input refused, 3 cannot write (see informatech_rotation::commande).
                 if crate::platform::is_installed() && is_root() {
                     match crate::informatech_rotation::commande(&args[1..]) {
                         Ok(()) => println!("Done!"),
-                        Err(err) => println!("{err}"),
+                        Err((code, err)) => {
+                            println!("{err}");
+                            std::process::exit(code);
+                        }
                     }
                 } else {
                     println!("Installation and administrative privileges required!");
+                    std::process::exit(1);
                 }
             }
             return None;
         } else if args[0] == "--close-connections" {
             // InformaTech: end every incoming session on this computer (hub « Terminer la session »).
+            // Same rule: 0 only when the order reached the service.
             match crate::common::informatech_close_connections() {
                 Ok(()) => println!("Done!"),
-                Err(err) => println!("{err}"),
+                Err(err) => {
+                    println!("{err}");
+                    std::process::exit(1);
+                }
             }
             return None;
         } else if args[0] == "--set-id" {

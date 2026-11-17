@@ -3,8 +3,12 @@
 //!
 //! - Configured by `--informatech-rotation` (elevated), which reads ONE line of JSON `{ "url", "jeton" }` from stdin:
 //!   the token never appears on a command line. `--informatech-rotation --effacer` clears it. The state lives in a
-//!   machine folder, `%ProgramData%\InformaTech\OPMD`, readable by SYSTEM and Administrators only (explicit DACL,
-//!   no inheritance): the elevated kit agent writes it, the SYSTEM service reads it (Argos A12 P2/P3).
+//!   machine folder, `<system drive>\ProgramData\InformaTech\OPMD` (drive asked to Windows, never %ProgramData%),
+//!   readable by SYSTEM and Administrators only (protected DACL): the elevated kit agent creates and writes it, the
+//!   SYSTEM service reads it and rewrites the state file in place (Argos A12 P2/P3).
+//! - Scylla 17/11: nobody takes a folder over. A level that already exists must already be trusted (a real folder
+//!   owned by SYSTEM or Administrators); one a user created first, or a link, is left alone and rotation stays off on
+//!   that PC (`--informatech-rotation` exits 3), like the connection log. Nothing is removed recursively, ever.
 //! - Runs in the `--server` process (SYSTEM), with its state on disk because `--server` is respawned often:
 //!   rotates at start (service start, and after `--close-connections`, which ends `--server`), and 3 minutes after the
 //!   last authorized connection closed by itself (an authorized reconnect within that time cancels it). Never while an
@@ -128,13 +132,14 @@ fn maintenant() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn dossier() -> PathBuf {
-    let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    base.join("InformaTech").join("OPMD")
+/// None when Windows does not give its system directory: then no state is read or written.
+fn dossier() -> Option<PathBuf> {
+    let systeme = systeme32("")?;
+    crate::informatech_journal::sous_programdata(systeme.to_str()?, "OPMD").map(PathBuf::from)
 }
 
-fn chemin() -> PathBuf {
-    dossier().join(FICHIER)
+fn chemin() -> Option<PathBuf> {
+    dossier().map(|d| d.join(FICHIER))
 }
 
 /// Who owns a folder or file of the state (Argos A12 re-check 2).
@@ -194,8 +199,15 @@ pub(crate) fn fiable(p: &std::path::Path) -> bool {
 
 /// The state's folders and file, from the top, all trusted.
 fn etat_fiable() -> bool {
-    let d = dossier();
-    d.parent().is_some_and(fiable) && fiable(&d) && fiable(&chemin())
+    let (Some(d), Some(p)) = (dossier(), chemin()) else {
+        return false;
+    };
+    d.parent().is_some_and(fiable) && fiable(&d) && fiable(&p)
+}
+
+/// The two folder levels (`InformaTech`, then `OPMD`), trusted, without touching anything.
+fn dossiers_fiables(d: &std::path::Path) -> bool {
+    d.parent().is_some_and(fiable) && fiable(d)
 }
 
 /// A Windows tool by its full System32 path, asked to Windows itself: no PATH search, no environment variable a
@@ -225,19 +237,20 @@ pub(crate) fn commande_ok(programme: &str, args: &[&std::ffi::OsStr]) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Elevated writer: each level (`InformaTech`, then `OPMD`) is a real folder (a junction is removed, not followed),
-/// owned by Administrators, with exactly two ACEs: SYSTEM and Administrators, nothing inherited. Only paths go on the
-/// command lines, never a secret. Refuses if the result is still not trusted.
+/// Elevated writer only (`--informatech-rotation`): each missing level (`InformaTech`, then `OPMD`) is created closed
+/// (owner Administrators, SYSTEM and Administrators only, nothing inherited, in the same call); a level that exists
+/// must already be trusted, and gets the same DACL again. Never takes a folder over (no takeown), never removes one:
+/// an untrusted level refuses the whole configuration (Scylla 17/11). Only paths go on the command lines, never a
+/// secret.
 fn proteger(d: &std::path::Path) -> ResultType<()> {
     let niveaux = [d.parent().map(|x| x.to_path_buf()), Some(d.to_path_buf())];
     for n in niveaux.into_iter().flatten() {
-        if std::fs::symlink_metadata(&n).is_ok() && est_reparse(&n) {
-            // remove_dir on a junction removes the link itself.
-            std::fs::remove_dir(&n)?;
+        match std::fs::symlink_metadata(&n) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => creer_dossier_ferme(&n, "BA", false)?,
+            Err(e) => return Err(e.into()),
+            Ok(_) => {}
         }
-        std::fs::create_dir_all(&n)?;
-        // This writer is elevated and takes a folder a user created first; the service never does (S-076 C).
-        if !commande_ok("takeown.exe", &[std::ffi::OsStr::new("/F"), n.as_os_str(), std::ffi::OsStr::new("/A")]) {
+        if !fiable(&n) {
             hbb_common::anyhow::bail!("state folder not trusted");
         }
         poser_dacl(&n, false)?;
@@ -245,11 +258,41 @@ fn proteger(d: &std::path::Path) -> ResultType<()> {
     Ok(())
 }
 
+/// Creates ONE folder (never its parents) with the security descriptor of `sddl_dossier`, in one call: the folder never
+/// exists with ProgramData's inherited rights (Scylla 17/11). Fails if the name already exists.
+pub(crate) fn creer_dossier_ferme(p: &std::path::Path, proprietaire: &str, lecture_utilisateurs: bool) -> ResultType<()> {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+    use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+    use windows::Win32::Storage::FileSystem::CreateDirectoryW;
+    let sddl = HSTRING::from(crate::informatech_journal::sddl_dossier(proprietaire, lecture_utilisateurs));
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `sddl` is a NUL-terminated wide string that outlives the call; `sd` is a local out-parameter.
+    unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(&sddl, SDDL_REVISION_1, &mut sd, None) }?;
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: false.into(),
+    };
+    // SAFETY: `sa` and the descriptor it points to live through the call.
+    let cree = unsafe { CreateDirectoryW(&HSTRING::from(p.as_os_str()), Some(&sa)) };
+    // SAFETY: `sd` was allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW with LocalAlloc.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(sd.0)));
+    }
+    cree?;
+    Ok(())
+}
+
 /// THE closed DACL of InformaTech's machine folders, in one place (Scylla 17/11: the connection log's parent gets the
 /// same two entries as this writer's, from one function): SYSTEM and Administrators full, nothing inherited.
 /// `lecture_utilisateurs` adds ONE entry, read + execute for BUILTIN\Users: only the folder of the connection log
 /// (informatech_journal.rs), which the client's Hub reads without elevation. `/L`: icacls works on the path itself,
-/// never through a link. Refuses if the folder is not trusted afterwards.
+/// never through a link. ONE icacls call (Scylla 17/11: the former `/reset` first gave the folder ProgramData's
+/// inherited rights for a moment, where a user could create something in it). No `/reset` is needed: these folders
+/// are created closed by this code, or were already trusted (owned by SYSTEM or Administrators), so any explicit
+/// entry on them was set by SYSTEM or an administrator. Refuses if the folder is not trusted afterwards.
 pub(crate) fn poser_dacl(n: &std::path::Path, lecture_utilisateurs: bool) -> ResultType<()> {
     use std::ffi::OsStr;
     let c = n.as_os_str();
@@ -258,7 +301,7 @@ pub(crate) fn poser_dacl(n: &std::path::Path, lecture_utilisateurs: bool) -> Res
         droits.push(OsStr::new("*S-1-5-32-545:(OI)(CI)RX"));
     }
     droits.push(OsStr::new("/L"));
-    let ok = commande_ok("icacls.exe", &[c, OsStr::new("/reset"), OsStr::new("/L")]) && commande_ok("icacls.exe", &droits);
+    let ok = commande_ok("icacls.exe", &droits);
     if !ok || !fiable(n) {
         hbb_common::anyhow::bail!("state folder not trusted");
     }
@@ -266,48 +309,48 @@ pub(crate) fn poser_dacl(n: &std::path::Path, lecture_utilisateurs: bool) -> Res
 }
 
 fn lire() -> Option<Etat> {
-    if std::fs::symlink_metadata(chemin()).is_err() {
+    let p = chemin()?;
+    if std::fs::symlink_metadata(&p).is_err() {
         return None;
     }
     if !etat_fiable() {
         journal("state file ignored: folder or file not owned by SYSTEM/Administrators, or a link");
         return None;
     }
-    let texte = std::fs::read_to_string(chemin()).ok()?;
+    let texte = std::fs::read_to_string(&p).ok()?;
     serde_json::from_str(&texte).ok()
 }
 
-fn ecrire(e: &Etat) -> ResultType<()> {
-    let d = dossier();
-    // Before anything secret is written: real folders, owned by Administrators, closed to everyone else.
+/// Elevated configuration (`--informatech-rotation`): the folders are created closed or must already be trusted,
+/// then the state file is written.
+fn configurer(e: &Etat) -> ResultType<()> {
+    let Some(d) = dossier() else {
+        hbb_common::anyhow::bail!("no system directory");
+    };
     proteger(&d)?;
-    // Anything left in the folder by whoever created it first (a planted .tmp, a link…) goes, except our own trusted
-    // state file: its children kept their old owner and DACL (Argos re-check 3).
-    purger(&d)?;
-    let p = chemin();
-    let tmp = p.with_extension("tmp");
-    ecrire_neuf(&tmp, &serde_json::to_vec(e)?)?;
-    std::fs::rename(&tmp, &p)?;
-    Ok(())
+    ecrire(e)
 }
 
-/// Keep only the trusted state file; remove_file on a link removes the link, never its target.
-fn purger(d: &std::path::Path) -> ResultType<()> {
-    for entree in std::fs::read_dir(d)? {
-        let chemin_entree = entree?.path();
-        let garder = chemin_entree.file_name().and_then(|n| n.to_str()) == Some(FICHIER) && fiable(&chemin_entree);
-        if garder {
-            continue;
-        }
-        let meta = std::fs::symlink_metadata(&chemin_entree)?;
-        if meta.is_dir() && !est_reparse(&chemin_entree) {
-            std::fs::remove_dir_all(&chemin_entree)?;
-        } else if meta.is_dir() {
-            std::fs::remove_dir(&chemin_entree)?;
-        } else {
-            std::fs::remove_file(&chemin_entree)?;
-        }
+/// The state file, written in place by the elevated command or by the SYSTEM service (Scylla 17/11: the service
+/// never creates, takes over or cleans a folder). Only into trusted folders: a brand-new temporary file next to the
+/// state file, then renamed over it. The only thing ever removed is a leftover of that temporary file, one plain
+/// file; anything else under that name refuses the write.
+fn ecrire(e: &Etat) -> ResultType<()> {
+    let (Some(d), Some(p)) = (dossier(), chemin()) else {
+        hbb_common::anyhow::bail!("no system directory");
+    };
+    if !dossiers_fiables(&d) || (std::fs::symlink_metadata(&p).is_ok() && !fiable(&p)) {
+        hbb_common::anyhow::bail!("state folder not trusted");
     }
+    let tmp = p.with_extension("tmp");
+    match std::fs::symlink_metadata(&tmp) {
+        Ok(m) if m.is_file() => std::fs::remove_file(&tmp)?,
+        Ok(_) => hbb_common::anyhow::bail!("temporary name taken by something else"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    ecrire_neuf(&tmp, &serde_json::to_vec(e)?)?;
+    std::fs::rename(&tmp, &p)?;
     Ok(())
 }
 
@@ -321,7 +364,9 @@ pub(crate) fn ecrire_neuf(p: &std::path::Path, octets: &[u8]) -> ResultType<()> 
 }
 
 fn effacer_fichier() {
-    let _ = std::fs::remove_file(chemin());
+    if let Some(p) = chemin() {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 #[cfg(not(test))]
@@ -421,16 +466,18 @@ pub(crate) fn pas(etat: Etat, action: Action, maintenant: u64, effets: &mut impl
     }
 }
 
-/// `--informatech-rotation [--effacer]` (elevated, installed). Reads the configuration from stdin.
-pub fn commande(args: &[String]) -> Result<(), &'static str> {
+/// `--informatech-rotation [--effacer]` (elevated, installed). Reads the configuration from stdin. On failure: the
+/// exit code (Scylla 17/11: the elevated caller reads nothing else) and a fixed sentence: 2 the input is refused,
+/// 3 the state cannot be written (an untrusted folder included).
+pub fn commande(args: &[String]) -> Result<(), (i32, &'static str)> {
     if args.iter().any(|a| a == "--effacer") {
         effacer_fichier();
         return Ok(());
     }
     let mut ligne = String::new();
-    std::io::stdin().read_line(&mut ligne).map_err(|_| "cannot read stdin")?;
-    let e = lire_configuration(&ligne)?;
-    ecrire(&e).map_err(|_| "cannot write the state file")?;
+    std::io::stdin().read_line(&mut ligne).map_err(|_| (2, "cannot read stdin"))?;
+    let e = lire_configuration(&ligne).map_err(|m| (2, m))?;
+    configurer(&e).map_err(|_| (3, "cannot write the state file"))?;
     Ok(())
 }
 
@@ -610,9 +657,20 @@ mod tests {
         std::fs::remove_file(&tmp).unwrap();
         ecrire_neuf(&tmp, b"neuf").unwrap();
         assert_eq!(std::fs::read(&tmp).unwrap(), b"neuf");
-        purger(&d).unwrap();
-        assert!(std::fs::read_dir(&d).unwrap().next().is_none(), "untrusted entries purged");
+        std::fs::remove_file(&tmp).unwrap();
         std::fs::remove_dir(&d).unwrap();
+    }
+
+    /// Scylla 17/11: a folder a user created is never taken over, nor written into, and nothing in it is removed.
+    #[test]
+    fn un_dossier_cree_par_un_utilisateur_n_est_jamais_repris() {
+        let d = std::env::temp_dir().join(format!("a12-utilisateur-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("OPMD").join("dedans")).unwrap();
+        std::fs::write(d.join("OPMD").join("dedans").join("x"), b"x").unwrap();
+        // The test user owns both levels: not trusted, so proteger refuses and touches nothing.
+        assert!(proteger(&d.join("OPMD")).is_err());
+        assert!(d.join("OPMD").join("dedans").join("x").is_file());
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

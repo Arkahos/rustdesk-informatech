@@ -59,12 +59,29 @@ pub(crate) fn etat(pret: bool) -> &'static str {
     }
 }
 
-/// The log's folder from Windows' system directory (`C:\Windows\System32` → `C:\ProgramData\InformaTech\OPMD-journal`);
-/// None when that is not a path on a lettered drive.
-pub(crate) fn dossier_du_journal(systeme: &str) -> Option<String> {
+/// `<drive>\ProgramData\InformaTech\<nom>` from Windows' system directory (`C:\Windows\System32`); None when that is
+/// not a path on a lettered drive. The connection log (`OPMD-journal`) and A12's state (`OPMD`) both live there:
+/// never found through an environment variable a user could set (Scylla 17/11).
+pub(crate) fn sous_programdata(systeme: &str, nom: &str) -> Option<String> {
     let o = systeme.as_bytes();
     (o.len() >= 3 && o[0].is_ascii_alphabetic() && o[1] == b':' && o[2] == b'\\')
-        .then(|| format!("{}\\ProgramData\\InformaTech\\{DOSSIER}", &systeme[..2]))
+        .then(|| format!("{}\\ProgramData\\InformaTech\\{nom}", &systeme[..2]))
+}
+
+/// The log's folder from Windows' system directory (`C:\Windows\System32` → `C:\ProgramData\InformaTech\OPMD-journal`).
+pub(crate) fn dossier_du_journal(systeme: &str) -> Option<String> {
+    sous_programdata(systeme, DOSSIER)
+}
+
+/// THE security descriptor an InformaTech machine folder is CREATED with (Scylla 17/11: no window between the
+/// creation and the closing of the folder, when it would inherit ProgramData's rights and a user could plant something
+/// in it): owner `proprietaire` (`SY` the service, `BA` the elevated writer), a protected DACL (nothing inherited) with
+/// SYSTEM and Administrators full control, and, with `lecture_utilisateurs`, read + execute for BUILTIN\Users (the
+/// connection log's folder only, read by the unelevated Hub). The same entries `poser_dacl` sets on a folder that
+/// already exists.
+pub(crate) fn sddl_dossier(proprietaire: &str, lecture_utilisateurs: bool) -> String {
+    let utilisateurs = if lecture_utilisateurs { "(A;OICI;FRFX;;;BU)" } else { "" };
+    format!("O:{proprietaire}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA){utilisateurs}")
 }
 
 #[derive(Serialize)]
@@ -276,7 +293,7 @@ pub(crate) fn ajouter(d: &Path, ligne: &str, maintenant: u64) -> std::io::Result
 #[cfg(windows)]
 mod service {
     use super::*;
-    use crate::informatech_rotation::{commande_ok, fiable, poser_dacl, systeme32};
+    use crate::informatech_rotation::{commande_ok, creer_dossier_ferme, fiable, poser_dacl, systeme32};
     use hbb_common::rand::{rngs::OsRng, RngCore};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -338,10 +355,11 @@ mod service {
     }
 
     /// True when the log is ready to be appended to. Order (Scylla 17/11): the trust check FIRST, on the three
-    /// levels; an untrusted one ends here with nothing touched. Then only: create what is missing (`create_dir`
-    /// fails if the name appeared meanwhile), check again that what was created is ours, and only then set the DACL
-    /// (icacls on a path that has just passed the check, `/L`) and the owner. No takeown: a folder that needs one is
-    /// not trusted, hence skipped.
+    /// levels; an untrusted one ends here with nothing touched. Then only: create what is missing, already closed
+    /// (`creer_dossier_ferme`: the folder is born with its owner and protected DACL, and fails if the name appeared
+    /// meanwhile), check again that what was created is ours, and only then set the DACL again (one icacls call on a
+    /// path that has just passed the check, `/L`) and the owner. No takeown: a folder that needs one is not trusted,
+    /// hence skipped. Nothing is ever removed here but the module's own temporary file.
     fn preparer(d: &Path) -> bool {
         use std::ffi::OsStr;
         let Some(parent) = d.parent() else {
@@ -351,10 +369,10 @@ mod service {
         let Plan::Ecrire { creer_parent, creer_dossier } = plan(niveau(parent), niveau(d), niveau(&p)) else {
             return false;
         };
-        if creer_parent && (std::fs::create_dir(parent).is_err() || !fiable(parent) || poser_dacl(parent, false).is_err()) {
+        if creer_parent && (creer_dossier_ferme(parent, "SY", false).is_err() || !fiable(parent) || poser_dacl(parent, false).is_err()) {
             return false;
         }
-        if creer_dossier && std::fs::create_dir(d).is_err() {
+        if creer_dossier && creer_dossier_ferme(d, "SY", true).is_err() {
             return false;
         }
         if !fiable(d)
@@ -564,6 +582,20 @@ mod tests {
         recreer(&d, &lire(&d.join(FICHIER)).unwrap(), maintenant + 2 * AN + 1).unwrap();
         assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), "");
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Scylla 17/11: a machine folder is created closed, in one call (no inherited right at any moment).
+    #[test]
+    fn folders_are_created_closed() {
+        assert_eq!(sddl_dossier("SY", true), "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FRFX;;;BU)");
+        assert_eq!(sddl_dossier("BA", false), "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
+        // `P`: protected, nothing inherited from ProgramData (where Users may create folders and files).
+        for s in [sddl_dossier("SY", false), sddl_dossier("BA", true)] {
+            assert!(s.contains("D:P("), "{s}");
+            assert!(!s.contains(";;;WD)") && !s.contains(";;;AU)") && !s.contains(";;;CO)"), "{s}");
+        }
+        assert_eq!(sous_programdata(r"C:\Windows\System32\", "OPMD").as_deref(), Some(r"C:\ProgramData\InformaTech\OPMD"));
+        assert_eq!(sous_programdata(r"\\?\C:\Windows", "OPMD"), None);
     }
 
     /// Scylla 17/11: the state the Hub reads, and where the log lives (the same rule as the Hub's reader).
