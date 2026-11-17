@@ -12,7 +12,10 @@
 //! - Lines (format agreed with Zoro, 17/11; `t` = seconds since 1970 UTC):
 //!   `{"v":1,"evt":"debut","id":"<16 hex>","t":…,"type":"controle","pair":"…","nom":"…","ip":"…"|null,"sessionOuverte":true|false}`
 //!   `{"v":1,"evt":"fin","id":"<same>","t":…}`
-//!   A « debut » with no « fin » means the engine stopped or the PC was cut. Nothing secret is ever written. `pair`
+//!   A « debut » with no « fin » means the engine stopped, the PC was cut, or the log went off meanwhile. The engine
+//!   writes a « fin » only after its « debut » (Argos P4-1); one can still stand alone in a file once the one-year
+//!   rule dropped its « debut »: a reader ignores it (Zoro's does). `sessionOuverte` is read when the connection is
+//!   authorized (Argos P4-2). Nothing secret is ever written. `pair`
 //!   and `nom` are what the remote side DECLARES: a reader shows them as such, never as a verified identity.
 //! - Scylla's ruling (17/11): a level that is not trusted (not a real folder, a reparse point, an owner other than
 //!   SYSTEM or Administrators) is never taken over, reset, deleted or written through: the connection is simply not
@@ -178,6 +181,30 @@ pub(crate) fn lire(p: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
+/// One message for the writer, its log id already drawn for a « debut ».
+pub(crate) enum Evenement {
+    Debut { conn_id: i32, id: String, ligne: String },
+    Fin { conn_id: i32, t: u64 },
+}
+
+/// The writer's step (Argos P4-1): a connection is remembered only once its « debut » is in the log, so a « fin » is
+/// never written alone (a « debut » skipped while the log was off, then a « fin » after it came back). `ecrire`
+/// appends one line and says whether it did. Pure, for the tests.
+pub(crate) fn traiter(ouvertes: &mut std::collections::HashMap<i32, String>, evenement: Evenement, ecrire: &mut dyn FnMut(&str) -> bool) {
+    match evenement {
+        Evenement::Debut { conn_id, id, ligne } => {
+            if ecrire(&ligne) {
+                ouvertes.insert(conn_id, id);
+            }
+        }
+        Evenement::Fin { conn_id, t } => {
+            if let Some(id) = ouvertes.remove(&conn_id) {
+                ecrire(&ligne_fin(&id, t));
+            }
+        }
+    }
+}
+
 /// What the trust check says of one level of the path (the parent folder, the log folder, the log file).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Niveau {
@@ -258,7 +285,7 @@ mod service {
     use std::time::{Duration, Instant};
 
     enum Message {
-        Debut { conn_id: i32, t: u64, genre: &'static str, pair: String, nom: String, ip: String },
+        Debut { conn_id: i32, t: u64, genre: &'static str, pair: String, nom: String, ip: String, session_ouverte: bool },
         Fin { conn_id: i32, t: u64 },
     }
 
@@ -359,21 +386,8 @@ mod service {
             journal("connections are not logged: the log folder is not trusted or cannot be prepared");
         }
         publier(pret);
-        while let Ok(message) = rx.recv() {
-            let ligne = match message {
-                Message::Debut { conn_id, t, genre, pair, nom, ip } => {
-                    let mut octets = [0u8; 8];
-                    OsRng.fill_bytes(&mut octets);
-                    let id = hex::encode(octets);
-                    let ligne = ligne_debut(&id, t, genre, &pair, &nom, &ip, !crate::platform::is_prelogin());
-                    ouvertes.insert(conn_id, id);
-                    ligne
-                }
-                Message::Fin { conn_id, t } => match ouvertes.remove(&conn_id) {
-                    Some(id) => ligne_fin(&id, t),
-                    None => continue,
-                },
-            };
+        // Appends one line when the log is ready; true when the line is in the log.
+        let mut ecrire = |ligne: &str| -> bool {
             if !pret && dernier_essai.elapsed() >= NOUVEL_ESSAI {
                 pret = preparer(&d);
                 dernier_essai = Instant::now();
@@ -382,15 +396,30 @@ mod service {
                 }
             }
             if !pret || ligne.is_empty() {
-                continue;
+                return false;
             }
             // Looked at again before every write: an untrusted level means skip, never repair.
-            if !(fiable(&d) && fiable(&d.join(FICHIER))) || ajouter(&d, &ligne, maintenant()).is_err() {
+            if !(fiable(&d) && fiable(&d.join(FICHIER))) || ajouter(&d, ligne, maintenant()).is_err() {
                 pret = false;
                 dernier_essai = Instant::now();
                 journal("connections are not logged: the log is not trusted or cannot be written");
                 publier(false);
+                return false;
             }
+            true
+        };
+        while let Ok(message) = rx.recv() {
+            let evenement = match message {
+                Message::Debut { conn_id, t, genre, pair, nom, ip, session_ouverte } => {
+                    let mut octets = [0u8; 8];
+                    OsRng.fill_bytes(&mut octets);
+                    let id = hex::encode(octets);
+                    let ligne = ligne_debut(&id, t, genre, &pair, &nom, &ip, session_ouverte);
+                    Evenement::Debut { conn_id, id, ligne }
+                }
+                Message::Fin { conn_id, t } => Evenement::Fin { conn_id, t },
+            };
+            traiter(&mut ouvertes, evenement, &mut ecrire);
         }
     }
 
@@ -405,7 +434,18 @@ mod service {
     /// An authorized connection has just opened. Never blocks.
     pub fn debut(conn_id: i32, conn_type: &str, pair: &str, nom: &str, ip: &str) {
         if let Some(tx) = FILE.get() {
-            let _ = tx.try_send(Message::Debut { conn_id, t: maintenant(), genre: genre(conn_type), pair: nettoyer(pair), nom: nettoyer(nom), ip: nettoyer(ip) });
+            // Argos P4-2: whether a Windows session is open is read here, at the authorization, not later in the
+            // writer.
+            let session_ouverte = !crate::platform::is_prelogin();
+            let _ = tx.try_send(Message::Debut {
+                conn_id,
+                t: maintenant(),
+                genre: genre(conn_type),
+                pair: nettoyer(pair),
+                nom: nettoyer(nom),
+                ip: nettoyer(ip),
+                session_ouverte,
+            });
         }
     }
 
@@ -554,6 +594,36 @@ mod tests {
         // Under the cap nothing is dropped.
         let petit: String = (0..600).map(|i| ligne_fin(&format!("{i:016x}"), i as u64) + "\n").collect();
         assert_eq!(garder(petit.as_bytes(), 0), petit.as_bytes());
+    }
+
+    /// Argos P4-1: a « fin » is written only for a connection whose « debut » is in the log.
+    #[test]
+    fn a_fin_is_never_written_without_its_debut() {
+        let mut ouvertes = std::collections::HashMap::new();
+        let mut ecrites: Vec<String> = Vec::new();
+        let debut = |conn_id: i32, id: &str| Evenement::Debut { conn_id, id: id.to_owned(), ligne: ligne_debut(id, 1, "controle", "p", "n", "", true) };
+        let a = "000000000000000a";
+        let b = "000000000000000b";
+        // The log is off when connection 1 opens: its « debut » is not written.
+        traiter(&mut ouvertes, debut(1, a), &mut |_| false);
+        // It comes back: connection 2 opens and is written.
+        traiter(&mut ouvertes, debut(2, b), &mut |l| {
+            ecrites.push(l.to_owned());
+            true
+        });
+        // Both close: only connection 2's « fin » is written; a « fin » for a connection never seen writes nothing.
+        for conn_id in [1, 2, 3] {
+            traiter(&mut ouvertes, Evenement::Fin { conn_id, t: 5 }, &mut |l| {
+                ecrites.push(l.to_owned());
+                true
+            });
+        }
+        assert_eq!(ecrites, vec![ligne_debut(b, 1, "controle", "p", "n", "", true), ligne_fin(b, 5)]);
+        assert!(ouvertes.is_empty());
+        // A « fin » whose write fails is not retried: the connection is forgotten all the same.
+        traiter(&mut ouvertes, debut(4, a), &mut |_| true);
+        traiter(&mut ouvertes, Evenement::Fin { conn_id: 4, t: 6 }, &mut |_| false);
+        assert!(ouvertes.is_empty());
     }
 
     /// Scylla 17/11: an untrusted level (a reparse point, a folder a user owns: `Douteux`, told by
