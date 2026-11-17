@@ -2511,6 +2511,22 @@ pub(crate) fn informatech_secret_de_commande(
     }
 }
 
+lazy_static::lazy_static! {
+    /// S-078: the password read from stdin by `--connect <id> --password-stdin`, kept in this process until the
+    /// Flutter side takes it once (on Windows, Dart parses the process command line itself, where the password no
+    /// longer is). Never written, never logged.
+    static ref INFORMATECH_SECRET_CONNEXION: std::sync::Mutex<Option<String>> = Default::default();
+}
+
+pub(crate) fn informatech_deposer_secret_connexion(secret: String) {
+    *INFORMATECH_SECRET_CONNEXION.lock().unwrap() = Some(secret);
+}
+
+/// Taken once: the second call gets nothing.
+pub(crate) fn informatech_prendre_secret_connexion() -> Option<String> {
+    INFORMATECH_SECRET_CONNEXION.lock().unwrap().take()
+}
+
 pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
     "refused: the password is never given on the command line; use --password-stdin or --password-random";
 
@@ -3318,6 +3334,11 @@ mod tests {
         assert_eq!(r1.len(), 24);
         assert!(r1.chars().all(|c| c.is_ascii_alphanumeric()));
         assert_ne!(r1, r2);
+        // The password of `--connect … --password-stdin` is handed to the Flutter side once, then gone.
+        assert_eq!(informatech_prendre_secret_connexion(), None);
+        informatech_deposer_secret_connexion("p".to_owned());
+        assert_eq!(informatech_prendre_secret_connexion().as_deref(), Some("p"));
+        assert_eq!(informatech_prendre_secret_connexion(), None);
     }
 
     #[test]

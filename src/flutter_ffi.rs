@@ -1855,6 +1855,12 @@ pub fn main_informatech_effacer_traces() {
     hbb_common::config::LocalConfig::set_remote_id("");
 }
 
+/// InformaTech (S-078): the password that `--connect <id> --password-stdin` read from stdin, for the Dart parser of
+/// the command line. Given once (empty afterwards, and when there is none).
+pub fn main_informatech_prendre_mot_de_passe() -> SyncReturn<String> {
+    SyncReturn(crate::common::informatech_prendre_secret_connexion().unwrap_or_default())
+}
+
 pub fn main_has_hwcodec() -> SyncReturn<bool> {
     SyncReturn(has_hwcodec())
 }

@@ -2329,6 +2329,12 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         password = args[i + 1];
         i++;
         break;
+      case '--password-stdin':
+        // InformaTech (S-078): the engine read the password from stdin (never from the command line) and hands it
+        // over once. A `--password <value>` on the real command line never gets here: the engine exits first.
+        final lu = bind.mainInformatechPrendreMotDePasse();
+        if (lu.isNotEmpty) password = lu;
+        break;
       case '--switch_uuid':
         switchUuid = args[i + 1];
         i++;

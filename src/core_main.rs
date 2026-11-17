@@ -817,7 +817,12 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
             // InformaTech (S-078): `--connect <id> --password-stdin` reads the password from stdin; a password on the
             // command line is refused.
             "--password-stdin" => match crate::common::informatech_lire_secret_stdin() {
-                Ok(password) => param_array.push(format!("password={password}")),
+                Ok(password) => {
+                    // For a window that already runs (sent over the in-process link below), and for this process's
+                    // own Flutter side when it is the first window (taken once through the bridge).
+                    crate::common::informatech_deposer_secret_connexion(password.clone());
+                    param_array.push(format!("password={password}"));
+                }
                 Err(refus) => {
                     println!("{refus}");
                     std::process::exit(2);
