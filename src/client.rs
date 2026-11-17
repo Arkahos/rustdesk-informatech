@@ -4147,7 +4147,8 @@ pub fn start_video_thread<F, T>(
                     }
                     MediaData::RecordScreen(start) => {
                         // InformaTech (Styx 16/11): the recorder's own door. A recording never starts here, whoever
-                        // asked (manual order, auto-record option); a stop still goes through.
+                        // asked (manual order, auto-record option). The viewer's loop drops the order before it gets
+                        // here, a stop included (informatech_capture_ignoree): harmless, nothing can have started.
                         let start = crate::common::informatech_enregistrement(start);
                         let id = session.lc.read().unwrap().id.clone();
                         if let Some(handler) = video_handler.as_mut() {

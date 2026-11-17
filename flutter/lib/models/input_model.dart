@@ -1623,9 +1623,12 @@ class InputModel {
     final mediaData = MediaQueryData.fromView(
         WidgetsBinding.instance.platformDispatcher.views.first);
     final adjustY = parent.target?.canvasModel.getAdjustY() ?? 0.0;
+    // InformaTech (Argos 17/11, P4): on Android the session's top bar has already taken the top inset, so the body
+    // this listener sits on starts under it and its SafeArea adds nothing at the top.
+    final insetHaut = isAndroid ? 0.0 : mediaData.padding.top;
     return Offset(
       event.localPosition.dx - mediaData.padding.left,
-      event.localPosition.dy - mediaData.padding.top - adjustY,
+      event.localPosition.dy - insetHaut - adjustY,
     );
   }
 

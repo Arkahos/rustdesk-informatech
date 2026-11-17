@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderStack;
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/toolbar.dart';
@@ -467,6 +468,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   /// 60 s after the PC stops seeing the connection; until then a second open on that access is refused (D14).
   void _itTerminer() {
     setState(() => _itConfirme = false);
+    // Argos 17/11 (P2): the engine session and the foreground service are closed HERE, before Admin comes to the
+    // front. closeConnection() only pops the route, and dispose() runs once the 300 ms pop transition has ended,
+    // which never happens in a paused app: the session stayed connected behind InformaTech Admin. dispose() repeats
+    // these calls harmlessly when it does run.
+    unawaited(bind.sessionClose(sessionId: sessionId));
+    platformFFI.invokeMethod('informatech_session', false);
+    bind.mainInformatechEffacerTraces();
+    Future.delayed(const Duration(seconds: 3), () => bind.mainInformatechEffacerTraces());
     closeConnection();
     platformFFI.invokeMethod('informatech_ouvrir_admin');
   }
@@ -619,7 +628,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                               );
                               // InformaTech (D10): landscape and tablet, the tools sit in a rail right of the image.
                               if (isAndroid && InformatechMarges.droite > 0) {
-                                return Row(children: [
+                                // stretch: the rail is as tall as the body (Gon's layout), its tools centred.
+                                return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                                   Expanded(child: image),
                                   _itBarreBas(rail: true),
                                 ]);
@@ -1067,7 +1077,11 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
     }
     if (renderObject is RenderBox) {
       final size = renderObject.size;
-      Offset pos = renderObject.localToGlobal(Offset.zero);
+      // InformaTech (D10, Argos 17/11 P3): on Android the image starts under the top bar, not at the top of the
+      // screen, and every reader of this rect (canvas height, canvas shift, touch block) works in the image's own
+      // coordinates: the rect is measured from the image's Stack, not from the screen.
+      Offset pos = renderObject.localToGlobal(Offset.zero,
+          ancestor: isAndroid ? context.findAncestorRenderObjectOfType<RenderStack>() : null);
       gFFI.cursorModel.keyHelpToolsVisibilityChanged(
           Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height),
           widget.keyboardIsVisible);

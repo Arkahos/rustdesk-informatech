@@ -4077,7 +4077,12 @@ impl Connection {
                 Some(message::Union::ScreenshotRequest(request)) => {
                     // InformaTech (Styx 16/11, Scylla S-077): the PC never hands a screenshot of its screen out.
                     if crate::common::INFORMATECH_SANS_CAPTURE {
-                        log::info!("informatech: screenshot request refused");
+                        // The peer sets the rate of these requests (AGENTS.md, Logging; Argos 17/11).
+                        hbb_common::throttled_log!(
+                            std::time::Duration::from_secs(60),
+                            info,
+                            "informatech: screenshot request refused"
+                        );
                     } else if let Some(tx) = self.inner.tx.clone() {
                         crate::video_service::set_take_screenshot(
                             self.video_source(),

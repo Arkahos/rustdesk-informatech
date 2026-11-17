@@ -209,8 +209,11 @@ class BarreBas extends StatelessWidget {
         child: Container(
           width: rail,
           decoration: const BoxDecoration(border: Border(left: BorderSide(color: Charte.trait))),
-          child: SingleChildScrollView(
-            child: Column(children: [for (final o in _outils()) SizedBox(width: rail, height: 60, child: o)]),
+          // Centred in a rail as tall as the body (the page stretches it); scrolls when the body is shorter.
+          child: Center(
+            child: SingleChildScrollView(
+              child: Column(children: [for (final o in _outils()) SizedBox(width: rail, height: 60, child: o)]),
+            ),
           ),
         ),
       );

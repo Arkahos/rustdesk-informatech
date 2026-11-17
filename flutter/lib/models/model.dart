@@ -2398,7 +2398,17 @@ class CanvasModel with ChangeNotifier {
       // InformaTech (OPMD Android, D10): the session bars push the image, they never cover it.
       if (isAndroid) {
         w = w - InformatechMarges.droite;
-        h = h - InformatechMarges.haut - InformatechMarges.bas;
+        // Argos 17/11 (P3): in a session, one formula for the height, keyboard up or down. The key row's rect is
+        // relative to the image on Android (remote_page.dart, _updateRect), so its bottom is the row's height.
+        if (InformatechMarges.haut > 0) {
+          h = InformatechMarges.hauteurImage(
+              ecran: size.height,
+              insetHaut: mediaData.padding.top,
+              clavier: mediaData.viewInsets.bottom,
+              outilsClavier: parent.target?.cursorModel
+                      .keyHelpToolsRectToAdjustCanvas?.bottom ??
+                  0);
+        }
       }
     }
     return Size(w < 0 ? 0 : w, h < 0 ? 0 : h);
@@ -2408,6 +2418,9 @@ class CanvasModel with ChangeNotifier {
   double getAdjustY() {
     final bottom =
         parent.target?.cursorModel.keyHelpToolsRectToAdjustCanvas?.bottom ?? 0;
+    // InformaTech (Argos 17/11, P3): on Android the rect is already relative to the image (under the top bar, which
+    // took the top inset): the image moves down by the key row's height, nothing else.
+    if (isAndroid) return bottom;
     return max(bottom - MediaQueryData.fromView(ui.window).padding.top, 0);
   }
 

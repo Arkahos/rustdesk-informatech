@@ -17,8 +17,17 @@ for t in release profile; do
 done
 [ "$(grep -rl "val $c" . | wc -l)" = 3 ] || echec "$c is defined somewhere else too"
 # MainActivity: the three lines, in this order, exactly once; and nothing that could take the flag away again.
-n=$(grep -n "^        if (!InformatechFenetre.$c) {\$" "$m" | cut -d: -f1)
+# (`|| true`: without it an absent guard killed the script under `set -e` before any message, Argos 17/11.)
+n=$(grep -n "^        if (!InformatechFenetre.$c) {\$" "$m" | cut -d: -f1 || true)
 [ "$(echo "$n" | grep -c .)" = 1 ] || echec "MainActivity: the guarded block must appear exactly once"
+# The block must also RUN (Argos 17/11: an early `return` before the guard, or the block moved into a function nobody
+# calls, got past the lines above). It is the first statement of the one onCreate: between the signature and the
+# guard, only `super.onCreate(savedInstanceState)`, comments and blank lines.
+d=$(grep -n "^    override fun onCreate(savedInstanceState: Bundle?) {\$" "$m" | cut -d: -f1 || true)
+[ "$(echo "$d" | grep -c .)" = 1 ] || echec "MainActivity: exactly one « override fun onCreate(savedInstanceState: Bundle?) » expected"
+[ "$n" -gt "$d" ] || echec "MainActivity: the guarded block must sit inside onCreate (found above it)"
+avant=$(sed -n "$((d + 1)),$((n - 1))p" "$m" | grep -vE "^[[:space:]]*(//.*)?\$" || true)
+[ "$avant" = "        super.onCreate(savedInstanceState)" ] || echec "MainActivity: the guarded block must be the first statement of onCreate after super.onCreate, found before it: $avant"
 [ "$(sed -n "$((n + 1))p" "$m")" = "            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)" ] || echec "MainActivity: addFlags(FLAG_SECURE) must follow the guard"
 [ "$(sed -n "$((n + 2))p" "$m")" = "        }" ] || echec "MainActivity: the guarded block must hold addFlags only"
 # Nothing may take the flag away again: the only clearFlags / setFlags allowed in the app is upstream's own

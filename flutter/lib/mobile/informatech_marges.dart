@@ -30,6 +30,16 @@ class InformatechMarges {
     return change;
   }
 
+  /// Height left for the image in a session (Argos 17/11, P3), from the screen height [ecran]: the top bar sits under
+  /// the top inset [insetHaut] in both orientations; the Scaffold lays the bottom bar BEHIND the soft keyboard, so the
+  /// body ends at the taller of the two ([clavier] = viewInsets.bottom), never at their sum; [outilsClavier] is the
+  /// height of the key row shown above the image while the keyboard is up (0 otherwise).
+  static double hauteurImage(
+      {required double ecran, required double insetHaut, required double clavier, required double outilsClavier}) {
+    final h = ecran - insetHaut - haut - (clavier > bas ? clavier : bas) - outilsClavier;
+    return h < 0 ? 0 : h;
+  }
+
   static void retirer() {
     haut = 0;
     bas = 0;
