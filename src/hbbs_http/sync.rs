@@ -27,6 +27,10 @@ lazy_static::lazy_static! {
 
 #[cfg(not(any(target_os = "ios")))]
 pub fn start() {
+    // InformaTech (S-080, Scylla 17/11): no API server, so the heartbeat thread is never started (no call, no answer).
+    if crate::common::INFORMATECH_SANS_API {
+        return;
+    }
     let _sender = SENDER.lock().unwrap();
 }
 
@@ -290,6 +294,10 @@ fn heartbeat_url() -> String {
 }
 
 fn handle_config_options(config_options: HashMap<String, String>) {
+    // InformaTech (S-080): an answer never writes an option, whatever it carries.
+    if crate::common::INFORMATECH_SANS_API {
+        return;
+    }
     let mut options = Config::get_options();
     let default_settings = config::DEFAULT_SETTINGS.read().unwrap().clone();
     config_options
@@ -443,5 +451,18 @@ mod tests {
         ]
         .concat();
         assert_eq!(switch_grant_signed_msg("id1", "c1", "1700000000"), expected);
+    }
+}
+
+#[cfg(test)]
+mod informatech_tests {
+    /// S-080 (Scylla 17/11): no heartbeat URL, and an answer's options are never applied.
+    #[test]
+    fn informatech_s080_no_heartbeat_no_options_from_an_answer() {
+        assert_eq!(super::heartbeat_url(), "");
+        let avant = hbb_common::config::Config::get_option("custom-rendezvous-server");
+        let options = [("custom-rendezvous-server".to_owned(), "autre.example:21116".to_owned())].into_iter().collect();
+        super::handle_config_options(options);
+        assert_eq!(hbb_common::config::Config::get_option("custom-rendezvous-server"), avant);
     }
 }
