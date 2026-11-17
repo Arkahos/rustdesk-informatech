@@ -97,9 +97,8 @@ class _ScanPageState extends State<ScanPage> {
 
         var reader = QRCodeReader();
         var result = reader.decode(bitmap);
-        if (result.text.startsWith(bind.mainUriPrefixSync())) {
-          handleUriLink(uriString: result.text);
-        } else {
+        // InformaTech (Scylla 17/11): a QR code never starts a session; one that holds a link of ours is ignored.
+        if (!result.text.startsWith(bind.mainUriPrefixSync())) {
           showServerSettingFromQr(result.text);
         }
       } catch (e) {

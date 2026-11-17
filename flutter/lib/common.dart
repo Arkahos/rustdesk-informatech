@@ -2262,6 +2262,9 @@ setEnvTerminalAdmin() {
 
 // uri link handler
 bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
+  // InformaTech (Scylla 17/11): on a phone a link does nothing, whoever calls this. Keep this the first statement
+  // (android/verifier-liens.sh).
+  if (isAndroid || isIOS) return false;
   List<String>? args;
   if (cmdArgs != null && cmdArgs.isNotEmpty) {
     args = cmdArgs;
@@ -2403,6 +2406,9 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
 }
 
 List<String>? urlLinkToCmdArgs(Uri uri) {
+  // InformaTech (Scylla 17/11): on a phone a link is never turned into a command (this function connected by itself
+  // there). Keep this the first statement (android/verifier-liens.sh).
+  if (isAndroid || isIOS) return null;
   String? command;
   String? id;
   final options = [

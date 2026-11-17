@@ -183,7 +183,8 @@ void runMobileApp() async {
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
-  await initUniLinks();
+  // InformaTech (Scylla 17/11): no link entry on a phone. A session starts only through ConnexionActivity, from
+  // « InformaTech Admin »; no link is read at start-up or later (android/verifier-liens.sh fails the build otherwise).
   // InformaTech (A1): a cold start from « InformaTech Admin » finds its session waiting.
   if (isAndroid) {
     // A1 (Argos P3): traces of a session killed before its end go at start-up.

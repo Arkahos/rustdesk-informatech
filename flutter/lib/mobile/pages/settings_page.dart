@@ -20,7 +20,6 @@ import '../../models/platform_model.dart';
 import '../widgets/deploy_dialog.dart';
 import '../widgets/dialog.dart';
 import 'home_page.dart';
-import 'scan_page.dart';
 
 class SettingsPage extends StatefulWidget implements PageShape {
   @override
@@ -30,7 +29,8 @@ class SettingsPage extends StatefulWidget implements PageShape {
   final icon = Icon(Icons.settings);
 
   @override
-  final appBarActions = bind.isDisableSettings() ? [] : [ScanButton()];
+  // InformaTech (Scylla 17/11): no scan button, the viewer reads no QR code (no camera permission either).
+  final appBarActions = [];
 
   @override
   State<SettingsPage> createState() => _SettingsState();
@@ -1190,23 +1190,6 @@ void showAbout(OverlayDialogManager dialogManager) {
       actions: [],
     );
   }, clickMaskDismiss: true, backDismiss: true);
-}
-
-class ScanButton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(Icons.qr_code_scanner),
-      onPressed: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (BuildContext context) => ScanPage(),
-          ),
-        );
-      },
-    );
-  }
 }
 
 class _DisplayPage extends StatefulWidget {

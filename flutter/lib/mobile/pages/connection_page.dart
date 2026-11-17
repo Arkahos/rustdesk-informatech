@@ -52,7 +52,8 @@ class _ConnectionPageState extends State<ConnectionPage> {
   Iterable<Peer> _autocompleteOpts = [];
 
   _ConnectionPageState() {
-    if (!isWeb) _uniLinksSubscription = listenUniLinks();
+    // InformaTech (Scylla 17/11): no link is listened to on a phone (a later link was handled with no refusal and
+    // could carry an id and a password of someone else's choosing). `_uniLinksSubscription` stays null.
     _idController.addListener(() {
       _idEmpty.value = _idController.text.isEmpty;
     });
