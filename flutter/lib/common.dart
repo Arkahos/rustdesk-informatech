@@ -2268,6 +2268,9 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   // (android/verifier-liens.sh).
   if (isAndroid || isIOS) return false;
   List<String>? args;
+  // InformaTech (Scylla R1 18/11): true only for a link that reached the running window (uni-links, the warm path),
+  // never for the process's own command line, even when that line carries a link.
+  var depuisLien = false;
   if (cmdArgs != null && cmdArgs.isNotEmpty) {
     args = cmdArgs;
     // rustdesk <uri link>
@@ -2279,10 +2282,12 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
     }
   } else if (uri != null) {
     args = urlLinkToCmdArgs(uri);
+    depuisLien = true;
   } else if (uriString != null) {
     final uri = Uri.tryParse(uriString);
     if (uri != null) {
       args = urlLinkToCmdArgs(uri);
+      depuisLien = true;
     }
   }
   if (args == null) {
@@ -2341,8 +2346,15 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
       case '--password':
         // InformaTech (S-078, Scylla 17/11): a password on the command line is never taken, even where the engine's
         // parser (Rust argv) and this one (CommandLineToArgvW) cut the line differently. The session does not start.
-        print("refused: the password is never given on the command line");
-        return false;
+        // Scylla R1 18/11: the warm path's link (our engine → this window) carries its password this way: taken.
+        final pris = informatechMotDePasseDesArguments(args, i, depuisLien: depuisLien);
+        if (pris == null) {
+          print("refused: the password is never given on the command line");
+          return false;
+        }
+        password = pris;
+        i++;
+        break;
       case '--password-stdin':
         // InformaTech (S-078): the engine read the password from stdin (never from the command line) and hands it
         // over once. A `--password <value>` on the real command line never gets here: the engine exits first.

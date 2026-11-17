@@ -127,13 +127,33 @@ pub(crate) fn nettoyer(s: &str) -> String {
     s.chars().filter(|c| !c.is_control() && !format_invisible(*c)).take(MAX_TEXTE).collect()
 }
 
-/// Bidirectional controls and zero-width formatting characters: the Unicode format characters that change how the
-/// text around them reads; and the line and paragraph separators (Argos P4: not `is_control`, yet a reader may break
-/// the line there), the soft hyphen and the Mongolian vowel separator (invisible).
+/// Every Unicode format character (general category Cf, Scylla 18/11: bidirectional controls, zero-width characters,
+/// the soft hyphen, the tag characters U+E0000-E007F that can spell hidden text, …), the Mongolian vowel separator,
+/// and the line and paragraph separators (Argos P4: not `is_control`, yet a reader may break the line there). The
+/// list is Unicode 15's Cf, written out (std has no general category); the tag block is taken whole.
 fn format_invisible(c: char) -> bool {
     matches!(
         c,
-        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}'
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E007F}'
     )
 }
 
@@ -523,6 +543,8 @@ mod tests {
         assert_eq!(nettoyer(nom), "PCexe.jpgxy");
         // Argos P4: line and paragraph separators, soft hyphen, Mongolian vowel separator.
         assert_eq!(nettoyer("a\u{2028}b\u{2029}c\u{00AD}d\u{180E}e"), "abcde");
+        // Scylla 18/11: the whole Cf category, tag characters (hidden text) included.
+        assert_eq!(nettoyer("x\u{E0001}\u{E0068}\u{E0069}\u{E007F}\u{0600}\u{06DD}\u{2064}\u{13430}\u{1D173}y"), "xy");
         // Ordinary accents, other scripts and emoji stay.
         assert_eq!(nettoyer("Poste d’Élodie · 王 🙂"), "Poste d’Élodie · 王 🙂");
     }

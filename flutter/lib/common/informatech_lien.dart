@@ -9,6 +9,17 @@
 // Unlike the engine, any scheme is read: this only ever gets a link.
 import 'dart:convert';
 
+/// InformaTech (S-078, Scylla R1 18/11): what `handleUriLink` takes for `--password` at index `i` of `args`.
+/// From the real command line: nothing, the session does not start (the engine exits 2 on such a line first; this is
+/// the second lock). From a link that reached the running window (the warm path: our engine hands it
+/// `informatech://connect/<id>?password=…`, built from its stdin read, to a window of this very executable, owner
+/// checked), `urlLinkToCmdArgs` turns the link's password into `--password <value>`: that one is taken. null = refuse.
+String? informatechMotDePasseDesArguments(List<String> args, int i, {required bool depuisLien}) {
+  if (!depuisLien || i + 1 >= args.length) return null;
+  final valeur = args[i + 1];
+  return valeur.isEmpty ? null : valeur;
+}
+
 bool lienAvecMotDePasse(String lien) {
   final a = lien.replaceAll(RegExp(r'[\t\r\n]'), '').replaceAll('\\', '/').trim();
   final deuxPoints = a.indexOf(':');

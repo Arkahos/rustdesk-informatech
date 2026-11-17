@@ -497,11 +497,26 @@ pub(crate) fn ecrire_neuf(p: &std::path::Path, octets: &[u8]) -> ResultType<()> 
     Ok(())
 }
 
+/// Clears the state (Scylla 18/11): the same trust check as the writer first (`plan` on the three levels: one untrusted
+/// level, or something else planted under the file's name, refuses with nothing touched); nothing there is done;
+/// otherwise the one plain file is removed, and a failed removal is an error, never a silent success.
 #[cfg(windows)]
-fn effacer_fichier() {
-    if let Some(p) = chemin() {
-        let _ = std::fs::remove_file(p);
+fn effacer_fichier() -> ResultType<()> {
+    let (Some(d), Some(p)) = (dossier(), chemin()) else {
+        hbb_common::anyhow::bail!("no system directory");
+    };
+    let Some(parent) = d.parent() else {
+        hbb_common::anyhow::bail!("state folder not trusted");
+    };
+    let fichier = niveau(&p);
+    if plan(niveau(parent), niveau(&d), fichier) == Plan::Passer {
+        hbb_common::anyhow::bail!("state folder not trusted");
     }
+    if fichier == Niveau::Absent {
+        return Ok(());
+    }
+    std::fs::remove_file(&p)?;
+    Ok(())
 }
 
 #[cfg(not(test))]
@@ -609,8 +624,8 @@ pub(crate) fn pas(etat: Etat, action: Action, maintenant: u64, effets: &mut impl
 /// 3 the state cannot be written (an untrusted folder included).
 pub fn commande(args: &[String]) -> Result<(), (i32, &'static str)> {
     if args.iter().any(|a| a == "--effacer") {
-        effacer_fichier();
-        return Ok(());
+        // Scylla 18/11: 0 only when the state is gone (or was never there); 3 when it cannot be cleared.
+        return effacer_fichier().map_err(|_| (3, "cannot clear the state file"));
     }
     let mut ligne = String::new();
     std::io::stdin().read_line(&mut ligne).map_err(|_| (2, "cannot read stdin"))?;
@@ -654,7 +669,11 @@ pub fn demarrer(nb_connexions: fn() -> usize) {
                                 journal("cannot write the state file");
                             }
                         }
-                        None => effacer_fichier(),
+                        None => {
+                            if effacer_fichier().is_err() {
+                                journal("cannot clear the state file");
+                            }
+                        }
                     }
                 }
             }

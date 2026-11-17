@@ -1052,7 +1052,19 @@ mod tests {
         const INTERDITS: &[&str] = &[
             "call.arguments", "$args", "${args", "$arguments", "${arguments", "kBootArgs", "$cmdArgs", "${cmdArgs", "$uri",
             "${uri", "$link", "${link", "$initialLink", "${initialLink", "$url", "${url",
+            // Scylla 18/11: the secret itself, our link, a JSON dump, a concatenation.
+            "$password", "${password", "$secret", "${secret", "$lien", "${lien", "jsonEncode(", "+ args", "args +",
+            "+ password", "password +", "+ url", "url +", "+ uri", "uri +", "+ link", "link +",
         ];
+        // Scylla 18/11: every way Dart writes a line out, by the name right before the opening parenthesis (spaces
+        // allowed: « print ( »): print, debugPrint, debugPrintStack, debugPrintSynchronously, debugPrintThrottled,
+        // log / developer.log, stdout.write(ln), stderr.write(ln).
+        fn ecrit(nom: &str) -> bool {
+            ["print", "Print", "PrintStack", "PrintSynchronously", "PrintThrottled", ".log", "stdout.write", "stderr.write", "stdout.writeln", "stderr.writeln"]
+                .iter()
+                .any(|f| nom.ends_with(f))
+                || nom == "log"
+        }
         fn fichiers(d: &std::path::Path, sortie: &mut Vec<std::path::PathBuf>) {
             for e in std::fs::read_dir(d).unwrap().flatten() {
                 let p = e.path();
@@ -1074,10 +1086,22 @@ mod tests {
             }
             let s = std::fs::read_to_string(p).unwrap_or_default();
             let mut i = 0;
-            // Argos P3: `debugPrint(` holds « Print( », not « print( »: both spellings are calls to read.
-            let prochain = |d: usize| [s[d..].find("print("), s[d..].find("Print(")].into_iter().flatten().min().map(|k| d + k);
-            while let Some(debut) = prochain(i) {
-                let mut j = debut + "print(".len();
+            // Argos P3, Scylla 18/11: each « ( » whose name before it (dots kept, spaces skipped) writes a line out.
+            let prochain = |d: usize| -> Option<(usize, usize)> {
+                let mut k = d;
+                while let Some(o) = s[k..].find('(') {
+                    let ouvre = k + o;
+                    let avant = s[..ouvre].trim_end();
+                    let nom_debut = avant.char_indices().rev().find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_' || *c == '.')).map_or(0, |(x, c)| x + c.len_utf8());
+                    if ecrit(&avant[nom_debut..]) {
+                        return Some((nom_debut, ouvre + 1));
+                    }
+                    k = ouvre + 1;
+                }
+                None
+            };
+            while let Some((debut, apres)) = prochain(i) {
+                let mut j = apres;
                 let mut profondeur = 1;
                 for (n, c) in s[j..].char_indices() {
                     profondeur += match c {
@@ -1090,11 +1114,11 @@ mod tests {
                         break;
                     }
                 }
-                let appel = &s[debut..j.max(debut + "print(".len()).min(s.len())];
+                let appel = &s[debut..j.max(apres).min(s.len())];
                 if let Some(t) = INTERDITS.iter().find(|t| appel.contains(*t)) {
                     fautes.push(format!("{}:{} names {t}", p.display(), s[..debut].lines().count()));
                 }
-                i = j.max(debut + 1);
+                i = j.max(apres);
             }
         }
         assert!(fautes.is_empty(), "the viewer prints what may hold the password:\n{}", fautes.join("\n"));
