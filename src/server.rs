@@ -257,11 +257,31 @@ pub async fn create_tcp_connection(
     Ok(())
 }
 
-/// Our signed identity goes out and, when `secure`, the controller's reply keys `stream`.
+/// Our signed identity goes out and the controller's reply keys `stream`.
 /// Separate so it can be raced against the connection's eviction.
 async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()> {
     let (sk, pk) = Config::get_key_pair();
-    if secure && pk.len() == sign::PUBLICKEYBYTES && sk.len() == sign::SECRETKEYBYTES {
+    identity_handshake_cles(stream, secure, &sk, &pk).await
+}
+
+/// InformaTech (S-086, Scylla 21/11): fail closed. Upstream skipped the handshake when the
+/// connection was not marked secure or this side had no key pair, accepted an empty key from the
+/// controller (« Force to update pk ») and only logged an unexpected reply: in each case the
+/// session ran without a stream key. Every one of those now ends the connection; a session runs
+/// only on a negotiated key. (Direct IP access, which upstream ran unsecured, is refused too.)
+pub(crate) async fn identity_handshake_cles(
+    stream: &mut Stream,
+    secure: bool,
+    sk: &[u8],
+    pk: &[u8],
+) -> ResultType<()> {
+    if !secure {
+        bail!("Handshake refused: connection not secured, no key exchange (S-086)");
+    }
+    if pk.len() != sign::PUBLICKEYBYTES || sk.len() != sign::SECRETKEYBYTES {
+        bail!("Handshake refused: no identity key pair on this device (S-086)");
+    }
+    {
         let mut sk_ = [0u8; sign::SECRETKEYBYTES];
         sk_[..].copy_from_slice(&sk);
         let sk = sign::SecretKey(sk_);
@@ -330,13 +350,17 @@ async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()>
                                 },
                             )?;
                         } else if pk.asymmetric_value.is_empty() {
+                            // The controller could not verify us: our key may be stale on the
+                            // rendezvous server, so it is registered again, but nothing runs keyless.
+                            // (Not in tests: it writes the device's config.)
+                            #[cfg(not(test))]
                             Config::set_key_confirmed(false);
-                            log::info!("Force to update pk");
+                            bail!("Handshake refused: the controller sent no key (S-086)");
                         } else {
                             bail!("Handshake failed: invalid public sign key length from peer");
                         }
                     } else {
-                        log::error!("Handshake failed: invalid message type");
+                        bail!("Handshake refused: unexpected message instead of the controller's key (S-086)");
                     }
                 } else {
                     bail!("Handshake failed: invalid message format");
@@ -950,4 +974,122 @@ pub async fn stop_main_window_process() {
 #[cfg(windows)]
 pub(crate) fn informatech_nb_connexions_autorisees() -> usize {
     connection::AUTHED_CONNS.lock().map(|c| c.len()).unwrap_or(0)
+}
+
+/// S-086 (Scylla 21/11): the controlled side's handshake fails closed, one test per path, against a
+/// stand-in controller on loopback. Keys are generated here: the device's config is never read.
+#[cfg(test)]
+mod informatech_s086_tests {
+    use super::*;
+    use hbb_common::tcp::FramedStream;
+
+    /// The served stream and the controller's end of one loopback connection.
+    async fn paire() -> (Stream, FramedStream) {
+        let listener = new_listener("127.0.0.1:0", false).await.unwrap();
+        let (controleur, accepte) = tokio::join!(
+            tokio::net::TcpStream::connect(listener.local_addr().unwrap()),
+            listener.accept()
+        );
+        let (controleur, (accepte, addr)) = (controleur.unwrap(), accepte.unwrap());
+        let ici = controleur.local_addr().unwrap();
+        (Stream::Tcp(FramedStream::from(accepte, addr)), FramedStream::from(controleur, ici))
+    }
+
+    fn cles() -> (Vec<u8>, Vec<u8>) {
+        let (pk, sk) = sign::gen_keypair();
+        (sk.0.to_vec(), pk.0.to_vec())
+    }
+
+    /// Runs the handshake with a controller that reads our identity, then answers with what
+    /// `reponse` builds from the box key in it (None: answers nothing and closes).
+    async fn poignee(reponse: impl FnOnce([u8; 32]) -> Option<Vec<u8>> + Send + 'static) -> (ResultType<()>, bool) {
+        let (sk, pk) = cles();
+        let (mut servi, mut controleur) = paire().await;
+        let sign_pk = sign::PublicKey(pk.clone().try_into().unwrap());
+        let ctrl = tokio::spawn(async move {
+            let bytes = controleur.next().await.unwrap().unwrap();
+            let Some(message::Union::SignedId(si)) = Message::parse_from_bytes(&bytes).unwrap().union else {
+                panic!("expected our signed identity");
+            };
+            let id_pk = IdPk::parse_from_bytes(&sign::verify(&si.id, &sign_pk).unwrap()).unwrap();
+            let their: [u8; 32] = id_pk.pk.to_vec().try_into().unwrap();
+            if let Some(r) = reponse(their) {
+                controleur.send_raw(r).await.unwrap();
+            }
+            let _ = hbb_common::timeout(1000, controleur.next()).await;
+        });
+        let r = hbb_common::timeout(5000, identity_handshake_cles(&mut servi, true, &sk, &pk)).await.unwrap();
+        let securise = servi.is_secured();
+        drop(servi);
+        ctrl.await.ok();
+        (r, securise)
+    }
+
+    fn cle_publique(pk: PublicKey) -> Option<Vec<u8>> {
+        let mut msg = Message::new();
+        msg.set_public_key(pk);
+        Some(msg.write_to_bytes().unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_s086_not_secure_is_refused() {
+        let (sk, pk) = cles();
+        let (mut servi, _controleur) = paire().await;
+        let e = identity_handshake_cles(&mut servi, false, &sk, &pk).await.unwrap_err();
+        assert!(e.to_string().contains("S-086"), "{e}");
+        assert!(!servi.is_secured());
+    }
+
+    #[tokio::test]
+    async fn test_s086_no_key_pair_is_refused() {
+        let (mut servi, _controleur) = paire().await;
+        let e = identity_handshake_cles(&mut servi, true, &[], &[]).await.unwrap_err();
+        assert!(e.to_string().contains("S-086"), "{e}");
+        assert!(!servi.is_secured());
+    }
+
+    #[tokio::test]
+    async fn test_s086_empty_controller_key_is_refused() {
+        let (r, securise) = poignee(|_| cle_publique(PublicKey::new())).await;
+        assert!(r.unwrap_err().to_string().contains("no key"));
+        assert!(!securise);
+    }
+
+    #[tokio::test]
+    async fn test_s086_unexpected_reply_is_refused() {
+        let (r, securise) = poignee(|_| {
+            let mut msg = Message::new();
+            msg.set_test_delay(TestDelay { time: 1, ..Default::default() });
+            Some(msg.write_to_bytes().unwrap())
+        })
+        .await;
+        assert!(r.unwrap_err().to_string().contains("unexpected message"));
+        assert!(!securise);
+    }
+
+    #[tokio::test]
+    async fn test_s086_malformed_reply_is_refused() {
+        let (r, securise) = poignee(|_| Some(vec![0xff, 0xff, 0xff, 0x01])).await;
+        assert!(r.is_err());
+        assert!(!securise);
+    }
+
+    #[tokio::test]
+    async fn test_s086_no_reply_is_refused() {
+        let (r, securise) = poignee(|_| None).await;
+        assert!(r.is_err());
+        assert!(!securise);
+    }
+
+    /// The control: a real key from the controller is what lets a session run.
+    #[tokio::test]
+    async fn test_s086_a_real_key_secures_the_stream() {
+        let (r, securise) = poignee(|their| {
+            let (asymmetric_value, symmetric_value, _) = crate::common::create_symmetric_key_msg(their);
+            cle_publique(PublicKey { asymmetric_value, symmetric_value, kx_version: 0, ..Default::default() })
+        })
+        .await;
+        r.unwrap();
+        assert!(securise);
+    }
 }

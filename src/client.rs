@@ -1651,15 +1651,15 @@ impl Client {
         } else {
             key
         });
-        // A WebRTC channel is peer-authenticated only once its DTLS fingerprint is bound to the
-        // verified peer identity below. Once a trusted identity IS established, every binding
-        // failure fails closed: any peer able to answer WebRTC also signs its fingerprint, so a
-        // mismatch is concrete evidence of a rendezvous/relay MITM (not a legacy peer), and
-        // callers fall back to a fresh relay connection rather than proceeding on that channel.
-        // Without a trusted identity (absent, or unverifiable under our configured root) no
-        // binding is possible at all; WebRTC then proceeds like TCP's non-secure fallback —
-        // DTLS-encrypted but reported unsecured. TCP/UDP/relay keep their existing behavior.
+        // InformaTech (S-086, Scylla 21/11): fail closed on EVERY transport. Upstream sent an empty
+        // message and went on without a stream key whenever the peer's identity did not verify
+        // (absent, not signed by our server's key, id or key mismatch, unexpected reply): a session
+        // in clear, with input injection, for anyone who hijacks the rendezvous name. OPMD's server
+        // always signs identities (OPMD_SERVER_KEY is mandatory), so each of those paths now ends
+        // the connection with `informatech_refus_sans_chiffrement`; only a negotiated key goes on.
+        // A WebRTC channel is also bound to the verified identity through its DTLS fingerprint.
         let is_webrtc = conn.is_webrtc();
+        let refus = |cause: &str| anyhow!(crate::common::informatech_refus_sans_chiffrement(cause));
         let mut sign_pk = None;
         let mut option_pk = None;
         if !signed_id_pk.is_empty() {
@@ -1675,17 +1675,8 @@ impl Client {
                 log::error!("Handshake failed: invalid public key from rendezvous server");
             }
         }
-        let sign_pk = match sign_pk {
-            Some(v) => v,
-            None => {
-                // No trusted peer identity (key-less deployment, or a blob that does not verify
-                // under our root), so no fingerprint binding is possible. Fall through like TCP's
-                // non-secure path with is_secured() false: bailing would only move the session to
-                // a relay that fails the same check and then runs in plaintext.
-                // send an empty message out in case server is setting up secure and waiting for first message
-                conn.send(&Message::new()).await?;
-                return Ok(option_pk);
-            }
+        let Some(sign_pk) = sign_pk else {
+            return Err(refus("no trusted peer identity from the rendezvous server"));
         };
         match timeout(READ_TIMEOUT, conn.next()).await? {
             Some(res) => {
@@ -1736,35 +1727,16 @@ impl Client {
                                     },
                                 )?;
                             } else {
-                                if is_webrtc {
-                                    bail!("WebRTC handshake id mismatch (possible MITM)");
-                                }
-                                log::error!("Handshake failed: sign failure");
-                                conn.send(&Message::new()).await?;
+                                return Err(refus("peer id mismatch in its signed identity (possible MITM)"));
                             }
                         } else {
-                            if is_webrtc {
-                                bail!("WebRTC peer identity could not be verified (refusing unbound channel)");
-                            }
-                            // fall back to non-secure connection in case pk mismatch
-                            log::info!("pk mismatch, fall back to non-secure");
-                            let mut msg_out = Message::new();
-                            msg_out.set_public_key(PublicKey::new());
-                            conn.send(&msg_out).await?;
+                            return Err(refus("peer identity not signed by its registered key (possible MITM)"));
                         }
                     } else {
-                        if is_webrtc {
-                            bail!("WebRTC handshake received an unexpected message type");
-                        }
-                        log::error!("Handshake failed: invalid message type");
-                        conn.send(&Message::new()).await?;
+                        return Err(refus("unexpected message type instead of the peer's identity"));
                     }
                 } else {
-                    if is_webrtc {
-                        bail!("WebRTC handshake received a malformed message");
-                    }
-                    log::error!("Handshake failed: invalid message format");
-                    conn.send(&Message::new()).await?;
+                    return Err(refus("malformed handshake message"));
                 }
             }
             None => {
@@ -5969,6 +5941,104 @@ mod kx_tests {
         let (seen, decrypted) = handshake(0, Some(0)).await;
         assert_eq!(seen.picked, 0);
         assert!(seen.decrypted && decrypted);
+    }
+
+    /// S-086: a stand-in controlled peer that answers the handshake with `reponse` (raw bytes),
+    /// or with nothing at all when None. Returns its host.
+    async fn peer_qui_repond(reponse: Option<Vec<u8>>) -> String {
+        let listener = hbb_common::tcp::new_listener("127.0.0.1:0", false).await.unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (stream, addr) = listener.accept().await.unwrap();
+            let mut s = FramedStream::from(stream, addr);
+            if let Some(r) = reponse {
+                s.send_raw(r).await.ok();
+            }
+            // Keeps the socket open long enough for the controller to decide.
+            let _ = hbb_common::timeout(3000, s.next()).await;
+        });
+        host
+    }
+
+    fn identite(id: &str, pk: &[u8], sk: &sign::SecretKey) -> Vec<u8> {
+        sign::sign(
+            &IdPk { id: id.to_owned(), pk: pk.to_vec().into(), ..Default::default() }.write_to_bytes().unwrap(),
+            sk,
+        )
+    }
+
+    fn signed_id(id: Vec<u8>) -> Vec<u8> {
+        let mut msg = Message::new();
+        msg.set_signed_id(SignedId { id: id.into(), ..Default::default() });
+        msg.write_to_bytes().unwrap()
+    }
+
+    /// The controller against a misbehaving peer: always an error naming the refusal, never a
+    /// stream left unsecured.
+    async fn refuse(signed_id_pk: Vec<u8>, rs_pk: &sign::PublicKey, reponse: Option<Vec<u8>>) {
+        let host = peer_qui_repond(reponse).await;
+        let mut conn = connect_tcp(host, 3000).await.unwrap();
+        let r = Client::secure_connection(PEER_ID, signed_id_pk, &crate::encode64(rs_pk.0), &mut conn).await;
+        match r {
+            Err(e) => assert!(e.to_string().starts_with("Connexion refusée"), "{e}"),
+            Ok(pk) => panic!("handshake accepted without a key: {pk:?}"),
+        }
+        assert!(!conn.is_secured());
+    }
+
+    #[tokio::test]
+    async fn test_s086_no_identity_from_the_rendezvous_server() {
+        let (rs_pk, _) = sign::gen_keypair();
+        refuse(Vec::new(), &rs_pk, None).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_identity_not_signed_by_our_server_key() {
+        let (rs_pk, _) = sign::gen_keypair();
+        let (_, autre_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        refuse(identite(PEER_ID, &peer_pk.0, &autre_sk), &rs_pk, None).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_identity_for_another_id() {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        refuse(identite("987654321", &peer_pk.0, &rs_sk), &rs_pk, None).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_peer_reply_signed_with_another_key() {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        let (_, imposteur_sk) = sign::gen_keypair();
+        let (box_pk, _) = box_::gen_keypair();
+        let reponse = signed_id(identite(PEER_ID, &box_pk.0, &imposteur_sk));
+        refuse(identite(PEER_ID, &peer_pk.0, &rs_sk), &rs_pk, Some(reponse)).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_peer_reply_for_another_id() {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, peer_sk) = sign::gen_keypair();
+        let (box_pk, _) = box_::gen_keypair();
+        let reponse = signed_id(identite("987654321", &box_pk.0, &peer_sk));
+        refuse(identite(PEER_ID, &peer_pk.0, &rs_sk), &rs_pk, Some(reponse)).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_peer_reply_of_another_type() {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        let reponse = test_delay(1).write_to_bytes().unwrap();
+        refuse(identite(PEER_ID, &peer_pk.0, &rs_sk), &rs_pk, Some(reponse)).await;
+    }
+
+    #[tokio::test]
+    async fn test_s086_malformed_peer_reply() {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        refuse(identite(PEER_ID, &peer_pk.0, &rs_sk), &rs_pk, Some(vec![0xff, 0xff, 0xff, 0x01])).await;
     }
 
     #[tokio::test]

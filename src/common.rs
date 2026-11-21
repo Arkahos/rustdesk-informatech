@@ -2399,6 +2399,13 @@ pub const OPMD_SERVER: &str = "opmd.informatech-paca.fr";
 /// InformaTech: the server's public key (Ed25519, base64). The server only accepts encrypted connections, so it is
 /// mandatory (from R2, rustdesk-server 1.1.16, 16/10). The release workflow refuses to build if it is empty.
 pub const OPMD_SERVER_KEY: &str = "ZNctqUAShcuH6NEbXEYRwEJdV67IsB21EylHj6AFrqw=";
+/// InformaTech (S-086, Scylla 21/11): what the viewer shows when the peer's identity cannot be verified, so no
+/// stream key can be negotiated: the connection ends instead of running in clear. `cause` (English, technical)
+/// follows in parentheses for the logs and for Adrien's report.
+pub(crate) fn informatech_refus_sans_chiffrement(cause: &str) -> String {
+    format!("Connexion refusée : l’identité du poste n’a pas pu être vérifiée, la session ne serait pas chiffrée. ({cause})")
+}
+
 // InformaTech: Windows-facing labels (Jax's OPMD design, D-135). APP_NAME stays the technical name
 // (service, folder, exe); these are only shown in services.msc and the apps list.
 pub const INFORMATECH_DISPLAY_NAME: &str = "InformaTech Assistance";
