@@ -4990,24 +4990,19 @@ pub enum Data {
     TakeScreenshot((i32, String)),
 }
 
+/// InformaTech (S-086, Adrien 21/11 « pas de Continuer »): an unencrypted session is never offered. Upstream asked
+/// « Insecure Connection » with a Continue button; this says why the connection ends and always refuses. Kept as a
+/// function (same callers) so a later upstream merge that calls it cannot bring the button back.
 pub async fn confirm_insecure_connection(
     interface: &impl Interface,
-    receiver: &mut UnboundedReceiver<Data>,
+    _receiver: &mut UnboundedReceiver<Data>,
 ) -> bool {
     interface.msgbox(
-        "insecure-connection-nocancel-hasclose",
-        "Insecure Connection",
-        "conn-e2ee-unavailable-tip",
+        "error",
+        "Connexion refusée",
+        &crate::common::informatech_refus_sans_chiffrement("stream not secured after the handshake"),
         "",
     );
-    while let Some(data) = receiver.recv().await {
-        match data {
-            Data::ContinueInsecureConnection => return true,
-            Data::RejectInsecureConnection => return false,
-            Data::Close => return false,
-            _ => {}
-        }
-    }
     false
 }
 
@@ -6048,6 +6043,27 @@ mod kx_tests {
         let (seen, decrypted) = handshake(KX_VERSION_LATEST, Some(0)).await;
         assert_eq!(seen.picked, 1);
         assert!(!seen.decrypted && !decrypted);
+    }
+}
+
+#[cfg(test)]
+mod informatech_s086_sans_continuer {
+    /// S-086: no « Continue » on an unencrypted session, and direct IP access is no exception.
+    #[test]
+    fn informatech_no_continue_on_an_unencrypted_session() {
+        let client = include_str!("client.rs").replace("\r\n", "\n");
+        let debut = client.find("pub async fn confirm_insecure_connection(").unwrap();
+        let corps = &client[debut..debut + client[debut..].find("\n}\n").unwrap()];
+        assert!(!corps.contains("return true") && !corps.contains("ContinueInsecureConnection"), "{corps}");
+        let boucle = include_str!("client/io_loop.rs").replace("\r\n", "\n");
+        let garde = boucle.find("if !is_secured").unwrap();
+        let bloc = &boucle[garde..garde + 200];
+        assert!(!bloc.contains("is_direct_ip_access"), "{bloc}");
+        let renvoi = include_str!("port_forward.rs").replace("
+", "
+");
+        assert_eq!(renvoi.matches("if !stream.is_secured() {").count(), 2);
+        assert!(!renvoi.contains("is_direct_ip_access"));
     }
 }
 

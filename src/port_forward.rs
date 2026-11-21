@@ -177,7 +177,8 @@ async fn connect_and_login(
     let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
     interface.update_direct(Some(direct));
-    if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
+    // InformaTech (S-086): no unencrypted session, direct IP access included (the confirm only refuses).
+    if !stream.is_secured() {
         if !confirm_insecure_connection(&interface, ui_receiver).await {
             *close_port_forward = true;
             return Ok(None);
@@ -418,7 +419,8 @@ async fn connect_and_login_mux(
     let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
     interface.update_direct(Some(direct));
-    if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
+    // InformaTech (S-086): no unencrypted session, direct IP access included (the confirm only refuses).
+    if !stream.is_secured() {
         if !confirm_insecure_connection(&interface, ui_receiver).await {
             *close_port_forward = true;
             return Ok(None);

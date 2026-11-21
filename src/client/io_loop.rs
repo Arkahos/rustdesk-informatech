@@ -233,8 +233,9 @@ impl<T: InvokeUiSession> Remote<T> {
                 };
                 self.handler
                     .set_connection_type(is_secured, direct, stream_type); // flutter -> connection_ready
+                // InformaTech (S-086): never a session without a stream key, direct IP access
+                // included; confirm_insecure_connection only says why and refuses.
                 if !is_secured
-                    && !crate::common::is_direct_ip_access(&self.handler.get_id())
                     && !client::confirm_insecure_connection(&self.handler, &mut self.receiver).await
                 {
                     self.send_close_reason(&mut peer, "").await;
