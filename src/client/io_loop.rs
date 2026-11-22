@@ -441,7 +441,12 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
             }
             Err(err) => {
-                self.handler.on_establish_connection_error(err.to_string());
+                // InformaTech (S-086): an identity refusal gets its own box (no retry hint, no auto-reconnect),
+                // decided by the error kind; every other error keeps upstream's handling.
+                match client::informatech_boite_refus(&err) {
+                    Some((titre, texte)) => self.handler.msgbox("error", titre, &texte, ""),
+                    None => self.handler.on_establish_connection_error(err.to_string()),
+                }
             }
         }
         self.handle_disconnected(round);

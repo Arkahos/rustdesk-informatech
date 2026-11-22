@@ -2399,11 +2399,32 @@ pub const OPMD_SERVER: &str = "opmd.informatech-paca.fr";
 /// InformaTech: the server's public key (Ed25519, base64). The server only accepts encrypted connections, so it is
 /// mandatory (from R2, rustdesk-server 1.1.16, 16/10). The release workflow refuses to build if it is empty.
 pub const OPMD_SERVER_KEY: &str = "ZNctqUAShcuH6NEbXEYRwEJdV67IsB21EylHj6AFrqw=";
-/// InformaTech (S-086, Scylla 21/11): what the viewer shows when the peer's identity cannot be verified, so no
-/// stream key can be negotiated: the connection ends instead of running in clear. `cause` (English, technical)
-/// follows in parentheses for the logs and for Adrien's report.
-pub(crate) fn informatech_refus_sans_chiffrement(cause: &str) -> String {
-    format!("Connexion refusée : l’identité du poste n’a pas pu être vérifiée, la session ne serait pas chiffrée. ({cause})")
+/// InformaTech (S-086, Scylla 21/11 and 22/11): the peer's identity could not be verified, so no stream key can be
+/// negotiated and the connection ends instead of running in clear. An error KIND, not a text: the viewer picks the box
+/// from the type (`informatech_boite_refus` in client.rs: title `TITRE_REFUS_IDENTITE`, never « Connection Error », so
+/// neither the Rust nor the Flutter retry rule reconnects), and a reworded or translated text cannot change that.
+/// `cause` (English, technical) goes to the log only, never to the user's box.
+#[derive(Debug)]
+pub struct RefusIdentite {
+    pub cause: String,
+}
+
+pub const TITRE_REFUS_IDENTITE: &str = "Connexion refusée";
+pub const TEXTE_REFUS_IDENTITE: &str =
+    "Connexion refusée : l’identité du poste n’a pas pu être vérifiée, la session ne serait pas chiffrée.";
+
+impl std::fmt::Display for RefusIdentite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(TEXTE_REFUS_IDENTITE)
+    }
+}
+
+impl std::error::Error for RefusIdentite {}
+
+/// The refusal as an error of kind `RefusIdentite`; its cause is logged here, once.
+pub(crate) fn informatech_refus_sans_chiffrement(cause: &str) -> hbb_common::anyhow::Error {
+    log::error!("S-086 connection refused, peer identity not verified: {cause}");
+    hbb_common::anyhow::Error::new(RefusIdentite { cause: cause.to_owned() })
 }
 
 // InformaTech: Windows-facing labels (Jax's OPMD design, D-135). APP_NAME stays the technical name

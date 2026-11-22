@@ -1601,12 +1601,17 @@ impl Client {
                             }
                             Err(e) => {
                                 interface.update_direct(Some(false));
-                                bail!(e);
+                                return Err(e);
                             }
                         }
                     }
                     Err(relay_e) => {
                         interface.update_direct(Some(direct));
+                        // InformaTech (S-086): an identity refusal stays a refusal (its own box, no retry).
+                        if e.is::<crate::common::RefusIdentite>() {
+                            log::warn!("relay fallback after the refusal also failed: {relay_e}");
+                            return Err(e);
+                        }
                         bail!(
                             "WebRTC secure failed ({}); relay fallback also failed: {}",
                             e,
@@ -1620,7 +1625,8 @@ impl Client {
                 interface.update_direct(Some(direct));
                 // webrtc_guard is still armed here, so a WebRTC winner whose secure handshake
                 // failed is closed by the guard's drop as we bail (no explicit close needed).
-                bail!(e);
+                // InformaTech (S-086): returned as is, so an identity refusal keeps its kind.
+                return Err(e);
             }
         };
         if typ == "WebRTC" {
@@ -1659,7 +1665,7 @@ impl Client {
         // the connection with `informatech_refus_sans_chiffrement`; only a negotiated key goes on.
         // A WebRTC channel is also bound to the verified identity through its DTLS fingerprint.
         let is_webrtc = conn.is_webrtc();
-        let refus = |cause: &str| anyhow!(crate::common::informatech_refus_sans_chiffrement(cause));
+        let refus = |cause: &str| crate::common::informatech_refus_sans_chiffrement(cause);
         let mut sign_pk = None;
         let mut option_pk = None;
         if !signed_id_pk.is_empty() {
@@ -4997,13 +5003,19 @@ pub async fn confirm_insecure_connection(
     interface: &impl Interface,
     _receiver: &mut UnboundedReceiver<Data>,
 ) -> bool {
-    interface.msgbox(
-        "error",
-        "Connexion refusée",
-        &crate::common::informatech_refus_sans_chiffrement("stream not secured after the handshake"),
-        "",
-    );
+    let refus = crate::common::informatech_refus_sans_chiffrement("stream not secured after the handshake");
+    if let Some((titre, texte)) = informatech_boite_refus(&refus) {
+        interface.msgbox("error", titre, &texte, "");
+    }
     false
+}
+
+/// InformaTech (S-086, Scylla 22/11): the box of a connection error of kind `RefusIdentite`, decided by the TYPE (never
+/// by the text): its own title, the user text without the technical cause, and a title that is not « Connection
+/// Error », so `check_if_retry` and Flutter's `shouldAutoRetryOnOffline` never reconnect. None for any other error.
+pub fn informatech_boite_refus(err: &hbb_common::anyhow::Error) -> Option<(&'static str, String)> {
+    err.downcast_ref::<crate::common::RefusIdentite>()
+        .map(|r| (crate::common::TITRE_REFUS_IDENTITE, r.to_string()))
 }
 
 /// Keycode for key events.
@@ -5975,7 +5987,10 @@ mod kx_tests {
         let mut conn = connect_tcp(host, 3000).await.unwrap();
         let r = Client::secure_connection(PEER_ID, signed_id_pk, &crate::encode64(rs_pk.0), &mut conn).await;
         match r {
-            Err(e) => assert!(e.to_string().starts_with("Connexion refusée"), "{e}"),
+            Err(e) => {
+                assert!(e.downcast_ref::<crate::common::RefusIdentite>().is_some(), "{e}");
+                assert_eq!(e.to_string(), crate::common::TEXTE_REFUS_IDENTITE);
+            }
             Ok(pk) => panic!("handshake accepted without a key: {pk:?}"),
         }
         assert!(!conn.is_secured());
@@ -6043,6 +6058,39 @@ mod kx_tests {
         let (seen, decrypted) = handshake(KX_VERSION_LATEST, Some(0)).await;
         assert_eq!(seen.picked, 1);
         assert!(!seen.decrypted && !decrypted);
+    }
+}
+
+#[cfg(test)]
+mod informatech_s086_refus_p3 {
+    use super::{check_if_retry, informatech_boite_refus};
+    use crate::common::{informatech_refus_sans_chiffrement, TEXTE_REFUS_IDENTITE, TITRE_REFUS_IDENTITE};
+    use hbb_common::anyhow::{anyhow, Context};
+
+    /// Chopper's P3 (22/11): the user box carries no English cause, and an identity refusal never auto-reconnects.
+    #[test]
+    fn informatech_refusal_box_without_cause_and_without_retry() {
+        let e = informatech_refus_sans_chiffrement("no trusted peer identity from the rendezvous server");
+        let (titre, texte) = informatech_boite_refus(&e).expect("a refusal is recognised by its type");
+        assert_eq!(titre, TITRE_REFUS_IDENTITE);
+        assert_eq!(texte, TEXTE_REFUS_IDENTITE);
+        assert!(!texte.contains("rendezvous") && !texte.contains('('), "{texte}");
+        assert_ne!(titre, "Connection Error");
+        for relais in [false, true] {
+            assert!(!check_if_retry("error", titre, &texte, relais));
+        }
+    }
+
+    /// Decided by the kind, never by the words: a text starting « Connexion refusée » is not a refusal, and a refusal
+    /// keeps its box when wrapped in a context or relayed as an anyhow::Error.
+    #[test]
+    fn informatech_refusal_is_a_kind_not_a_text() {
+        assert!(informatech_boite_refus(&anyhow!("{}", TEXTE_REFUS_IDENTITE)).is_none());
+        assert!(informatech_boite_refus(&anyhow!("Connection reset")).is_none());
+        let relaye: hbb_common::anyhow::Error = anyhow!(informatech_refus_sans_chiffrement("x"));
+        assert!(informatech_boite_refus(&relaye).is_some());
+        let avec_contexte = Err::<(), _>(informatech_refus_sans_chiffrement("x")).context("relay").unwrap_err();
+        assert!(informatech_boite_refus(&avec_contexte).is_some());
     }
 }
 
