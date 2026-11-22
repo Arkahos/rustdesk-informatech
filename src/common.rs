@@ -3594,6 +3594,10 @@ mod tests {
     /// process, `--option` refuses them, and the two compile-time switches are on.
     #[test]
     fn informatech_b2_options_locked() {
+        // The overwrites are process-wide: put them back afterwards, so the upstream tests that set the rendezvous
+        // server themselves (test_get_tcp_proxy_addr_*) still read their own values.
+        let avant = config::OVERWRITE_SETTINGS.read().unwrap().clone();
+        let avant_local = config::OVERWRITE_LOCAL_SETTINGS.read().unwrap().clone();
         apply_informatech_defaults();
         assert_eq!(Config::get_option(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK), "N");
         assert_eq!(Config::get_option(keys::OPTION_API_SERVER), "");
@@ -3611,6 +3615,8 @@ mod tests {
         }
         assert!(!informatech_option_verrouillee("audio-input"));
         assert!(INFORMATECH_REFUSE_WEBRTC && INFORMATECH_SANS_DECOUVERTE_LAN);
+        *config::OVERWRITE_SETTINGS.write().unwrap() = avant;
+        *config::OVERWRITE_LOCAL_SETTINGS.write().unwrap() = avant_local;
     }
 
     /// Argos P4 (23/11): the two runtime guards of S-094 and S-096 are where they act. The WebRTC answer is decided by
