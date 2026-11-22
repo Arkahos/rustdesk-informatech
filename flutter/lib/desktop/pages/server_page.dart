@@ -1,5 +1,6 @@
 // original cm window in Sciter version.
 
+import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_hbb/common/informatech_permissions.dart';
 import 'dart:async';
 import 'dart:math';
@@ -559,7 +560,8 @@ class _CmHeaderState extends State<_CmHeader>
             offstage: !client.authorized ||
                 (client.type_() != ClientType.remote &&
                     client.type_() != ClientType.file &&
-                    client.type_() != ClientType.camera),
+                    client.type_() != ClientType.camera) ||
+                !informatechBoutonChatCm(fichier: client.type_() == ClientType.file),
             child: IconButton(
               onPressed: () => checkClickTime(client.id, () {
                 if (client.type_() == ClientType.file) {

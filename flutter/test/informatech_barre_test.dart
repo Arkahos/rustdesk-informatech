@@ -53,6 +53,11 @@ void main() {
     expect(informatechChatOuvrable(android: false, modeClient: true), isTrue);
   });
 
+  test('Scylla P4: the client PC connection window shows no chat button in 0.x; a file connection keeps its button', () {
+    expect(informatechBoutonChatCm(fichier: false), isFalse);
+    expect(informatechBoutonChatCm(fichier: true), isTrue);
+  });
+
   test('duration reads mm:ss, then h:mm:ss', () {
     expect(dureeSession(const Duration(minutes: 12, seconds: 4)), '12:04');
     expect(dureeSession(const Duration(hours: 1, minutes: 2, seconds: 4)), '1:02:04');
