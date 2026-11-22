@@ -3594,10 +3594,10 @@ mod tests {
     /// process, `--option` refuses them, and the two compile-time switches are on.
     #[test]
     fn informatech_b2_options_locked() {
-        // The overwrites are process-wide: put them back afterwards, so the upstream tests that set the rendezvous
-        // server themselves (test_get_tcp_proxy_addr_*) still read their own values.
-        let avant = config::OVERWRITE_SETTINGS.read().unwrap().clone();
-        let avant_local = config::OVERWRITE_LOCAL_SETTINGS.read().unwrap().clone();
+        // The overwrites are process-wide: taken under OVERWRITES (the upstream test that sets its own rendezvous server
+        // holds it too, so a parallel run cannot read ours) and put back by a guard, even when an assertion fails.
+        let _verrou = OVERWRITES.lock().unwrap_or_else(|e| e.into_inner());
+        let _remise = RemiseDefauts::prendre();
         apply_informatech_defaults();
         assert_eq!(Config::get_option(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK), "N");
         assert_eq!(Config::get_option(keys::OPTION_API_SERVER), "");
@@ -3615,8 +3615,38 @@ mod tests {
         }
         assert!(!informatech_option_verrouillee("audio-input"));
         assert!(INFORMATECH_REFUSE_WEBRTC && INFORMATECH_SANS_DECOUVERTE_LAN);
-        *config::OVERWRITE_SETTINGS.write().unwrap() = avant;
-        *config::OVERWRITE_LOCAL_SETTINGS.write().unwrap() = avant_local;
+    }
+
+    /// Argos P4/P5 (23/11): serialises the tests that change process-wide config (`apply_informatech_defaults`).
+    static OVERWRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// What `apply_informatech_defaults` changes in the test process, put back on drop.
+    struct RemiseDefauts {
+        nom: String,
+        integres: HashMap<String, String>,
+        forces: HashMap<String, String>,
+        forces_local: HashMap<String, String>,
+    }
+
+    impl RemiseDefauts {
+        fn prendre() -> Self {
+            Self {
+                nom: config::APP_NAME.read().unwrap().clone(),
+                integres: config::BUILTIN_SETTINGS.read().unwrap().clone(),
+                forces: config::OVERWRITE_SETTINGS.read().unwrap().clone(),
+                forces_local: config::OVERWRITE_LOCAL_SETTINGS.read().unwrap().clone(),
+            }
+        }
+    }
+
+    impl Drop for RemiseDefauts {
+        fn drop(&mut self) {
+            *config::APP_NAME.write().unwrap_or_else(|e| e.into_inner()) = std::mem::take(&mut self.nom);
+            *config::BUILTIN_SETTINGS.write().unwrap_or_else(|e| e.into_inner()) = std::mem::take(&mut self.integres);
+            *config::OVERWRITE_SETTINGS.write().unwrap_or_else(|e| e.into_inner()) = std::mem::take(&mut self.forces);
+            *config::OVERWRITE_LOCAL_SETTINGS.write().unwrap_or_else(|e| e.into_inner()) =
+                std::mem::take(&mut self.forces_local);
+        }
     }
 
     /// Argos P4 (23/11): the two runtime guards of S-094 and S-096 are where they act. The WebRTC answer is decided by
@@ -4331,6 +4361,7 @@ mod tests {
 
     #[test]
     fn test_get_tcp_proxy_addr_normalizes_bare_ipv6_host() {
+        let _verrou = OVERWRITES.lock().unwrap_or_else(|e| e.into_inner()); // InformaTech: see informatech_b2_options_locked
         struct RestoreCustomRendezvousServer(String);
 
         impl Drop for RestoreCustomRendezvousServer {

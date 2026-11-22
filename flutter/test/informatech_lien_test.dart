@@ -18,7 +18,7 @@ void main() {
   // Where it is wired (common.dart): the link turns its password into `--password`, only the link branches of
   // handleUriLink set depuisLien, and the `--password` case asks the function above.
   test('handleUriLink takes the link password only from a link', () {
-    final source = File('lib/common.dart').readAsStringSync();
+    final source = File('lib/common.dart').readAsStringSync().replaceAll('\r\n', '\n');
     final debut = source.indexOf('bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {');
     final fin = source.indexOf('\n}\n', debut);
     expect(debut, greaterThan(0));
