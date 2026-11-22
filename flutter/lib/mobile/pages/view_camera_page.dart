@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/toolbar.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -317,7 +318,8 @@ class _ViewCameraPageState extends State<ViewCameraPage>
                       },
                     )
                   ] +
-                  (isWeb
+                  // InformaTech (0.x, kInformatechDiscussion): no chat button on the Android viewer.
+                  (isWeb || (isAndroid && !kInformatechDiscussion)
                       ? []
                       : <Widget>[
                           futureBuilder(
