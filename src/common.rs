@@ -3613,6 +3613,21 @@ mod tests {
         assert!(INFORMATECH_REFUSE_WEBRTC && INFORMATECH_SANS_DECOUVERTE_LAN);
     }
 
+    /// Argos P4 (23/11): the two runtime guards of S-094 and S-096 are where they act. The WebRTC answer is decided by
+    /// `webrtc_viable`, whose first term is the switch; the LAN listener's only start reads the gated value.
+    #[test]
+    fn informatech_b2_runtime_guards_in_place() {
+        let mediateur = include_str!("rendezvous_mediator.rs");
+        let place = |quoi: &str| mediateur.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let viable = place("let webrtc_viable = !crate::common::INFORMATECH_REFUSE_WEBRTC");
+        assert!(viable < place("let webrtc_sdp_answer = if webrtc_viable {"));
+        assert_eq!(mediateur.matches("let webrtc_viable =").count(), 1);
+        let garde = place("let start_lan_listening = start_lan_listening && !crate::common::INFORMATECH_SANS_DECOUVERTE_LAN;");
+        let depart = place("if start_lan_listening {");
+        assert!(garde < depart && depart < place("super::lan::start_listening()"));
+        assert_eq!(mediateur.matches("lan::start_listening()").count(), 1);
+    }
+
     #[test]
     fn informatech_s072_refused_permissions() {
         for refuse in [
