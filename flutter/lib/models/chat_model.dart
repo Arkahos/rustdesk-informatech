@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:draggable_float_widget/draggable_float_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/mobile/pages/home_page.dart';
@@ -368,6 +369,13 @@ class ChatModel with ChangeNotifier {
     }
 
     final messagekey = MessageKey(peerId, id);
+
+    // InformaTech (0.x, kInformatechDiscussion): on the Android viewer a message from the PC opens nothing; it is
+    // logged, never shown, and nothing is sent back.
+    if (!informatechChatOuvrable(android: isAndroid, modeClient: id == clientModeID)) {
+      debugPrint("informatech: chat hidden on the viewer (0.x), message from the PC not shown");
+      return;
+    }
 
     // mobile: first message show overlay icon
     if (!isDesktop && chatIconOverlayEntry == null) {
