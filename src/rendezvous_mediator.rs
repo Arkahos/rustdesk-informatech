@@ -296,6 +296,8 @@ impl RendezvousMediator {
         let start_lan_listening = true;
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let start_lan_listening = crate::platform::is_installed();
+        // InformaTech (S-096): no LAN discovery listener.
+        let start_lan_listening = start_lan_listening && !crate::common::INFORMATECH_SANS_DECOUVERTE_LAN;
         if start_lan_listening {
             std::thread::spawn(move || {
                 allow_err!(super::lan::start_listening());
@@ -1075,7 +1077,9 @@ impl RendezvousMediator {
         // syncs over IPC, so this (server) process would read the private-server default of "N"
         // and refuse to answer in exactly the self-hosted deployments the transport is for.
         // A proxy still rules it out — ICE would bypass it and leak the real IP.
-        let webrtc_viable = !ph.webrtc_sdp_offer.is_empty()
+        // InformaTech (S-094): the PC engine never answers a WebRTC offer.
+        let webrtc_viable = !crate::common::INFORMATECH_REFUSE_WEBRTC
+            && !ph.webrtc_sdp_offer.is_empty()
             && !Config::is_proxy()
             && (!webrtc_relay_only || WebRTCStream::has_turn_server());
         let webrtc_sdp_answer = if webrtc_viable {

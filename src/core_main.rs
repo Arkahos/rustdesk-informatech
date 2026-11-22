@@ -581,19 +581,25 @@ pub fn core_main() -> Option<Vec<String>> {
             }
             return None;
         } else if args[0] == "--option" {
+            // InformaTech (S-097): every refusal below exits non-zero, so a script or the Hub sees it.
             if is_cli_setting_change_disabled() {
                 println!("Settings are disabled!");
-                return None;
+                std::process::exit(1);
             }
             if crate::platform::is_installed() && is_root() {
                 if args.len() == 2 {
                     let options = crate::ipc::get_options();
                     println!("{}", options.get(&args[1]).unwrap_or(&"".to_owned()));
                 } else if args.len() == 3 {
+                    if crate::common::informatech_option_verrouillee(&args[1]) {
+                        println!("This option is locked in this build.");
+                        std::process::exit(1);
+                    }
                     crate::ipc::set_option(&args[1], &args[2]);
                 }
             } else {
                 println!("Installation and administrative privileges required!");
+                std::process::exit(1);
             }
             return None;
         } else if args[0] == "--assign" {
@@ -1014,6 +1020,24 @@ mod tests {
     /// first in `core_main`, before any other read of the command line, and before the two places that hand a command
     /// line to a window that already runs (`core_main_invoke_new_connection` here, the uni-links dispatch of the
     /// Windows runner, which calls the engine first). The same on a real process is owed on the Windows build.
+    /// S-097 (Scylla 23/11): inside `--option`, the three refusals exit 1 (the decision on a locked key is
+    /// `common::informatech_option_verrouillee`, tested there), and a locked key is refused before it is stored.
+    #[test]
+    fn informatech_s097_refused_option_exits_non_zero() {
+        let moteur = include_str!("core_main.rs");
+        let debut = moteur.find("} else if args[0] == \"--option\" {").expect("--option branch");
+        let fin = debut + moteur[debut..].find("} else if args[0] == \"--assign\" {").expect("next branch");
+        let branche = &moteur[debut..fin];
+        for refus in ["Settings are disabled!", "This option is locked in this build.", "Installation and administrative privileges required!"] {
+            let i = branche.find(refus).unwrap_or_else(|| panic!("{refus}"));
+            let suite = &branche[i..];
+            let sortie = suite.find("std::process::exit(1);").unwrap_or_else(|| panic!("no exit after {refus}"));
+            assert!(suite[..sortie].matches('\n').count() <= 1, "exit right after: {refus}");
+        }
+        let verrou = branche.find("crate::common::informatech_option_verrouillee(&args[1])").expect("lock check");
+        assert!(verrou < branche.find("crate::ipc::set_option(&args[1], &args[2]);").expect("set_option"));
+    }
+
     #[test]
     fn informatech_s078_refusal_comes_before_any_forwarding() {
         let place = |source: &str, quoi: &str| source.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));

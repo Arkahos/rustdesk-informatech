@@ -2885,6 +2885,27 @@ pub(crate) fn informatech_permissions_forcees() -> Vec<&'static str> {
     v
 }
 
+/// InformaTech (S-093, S-094, S-096; Scylla 23/11 from Chopper's B2 on 0.1.3): engine options an administrator could
+/// otherwise store and the engine would follow. No insecure TLS fallback on the engine's TLS paths, no API server of
+/// anyone's choosing (the product uses none: empty, as the default), no LAN discovery answers.
+pub(crate) const INFORMATECH_OPTIONS_VERROUILLEES: [(&str, &str); 3] = [
+    (keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK, "N"),
+    (keys::OPTION_API_SERVER, ""),
+    (keys::OPTION_ENABLE_LAN_DISCOVERY, "N"),
+];
+/// S-094: WebRTC is compiled in upstream. Locked off on the viewer (`enable-webrtc`, a local option) and refused by the
+/// PC engine whatever an offer says (`rendezvous_mediator.rs`, the answer to a punch-hole offer).
+pub(crate) const INFORMATECH_REFUSE_WEBRTC: bool = true;
+/// S-096: no LAN discovery listener (UDP 21119 on every interface answered pings with the ID and the PC name).
+pub(crate) const INFORMATECH_SANS_DECOUVERTE_LAN: bool = true;
+
+/// S-097: whether `--option <key> <value>` must be refused because this build locks the key (OVERWRITE): storing it
+/// would change nothing and say the opposite. Read after `apply_informatech_defaults`.
+pub(crate) fn informatech_option_verrouillee(option: &str) -> bool {
+    config::OVERWRITE_SETTINGS.read().unwrap().contains_key(option)
+        || config::OVERWRITE_LOCAL_SETTINGS.read().unwrap().contains_key(option)
+}
+
 pub(crate) fn apply_informatech_defaults() {
     // Même mécanisme que read_custom_client() : on écrit APP_NAME au runtime,
     // ce qui évite de modifier (et donc de forker) le sous-module hbb_common.
@@ -2915,6 +2936,9 @@ pub(crate) fn apply_informatech_defaults() {
     for option in informatech_permissions_forcees() {
         forces.insert(option.to_owned(), "N".to_owned());
     }
+    for (option, valeur) in INFORMATECH_OPTIONS_VERROUILLEES {
+        forces.insert(option.to_owned(), valeur.to_owned());
+    }
     // Never recorded (Styx 16/11): no automatic recording of incoming sessions (client PC) or outgoing ones (viewer).
     if INFORMATECH_SANS_CAPTURE {
         forces.insert(keys::OPTION_ALLOW_AUTO_RECORD_INCOMING.to_owned(), "N".to_owned());
@@ -2923,6 +2947,12 @@ pub(crate) fn apply_informatech_defaults() {
             .write()
             .unwrap()
             .insert(keys::OPTION_ALLOW_AUTO_RECORD_OUTGOING.to_owned(), "N".to_owned());
+    }
+    if INFORMATECH_REFUSE_WEBRTC {
+        config::OVERWRITE_LOCAL_SETTINGS
+            .write()
+            .unwrap()
+            .insert(keys::OPTION_ENABLE_WEBRTC.to_owned(), "N".to_owned());
     }
 }
 
@@ -3558,6 +3588,29 @@ mod tests {
         }
         // This test runs on the host, which is never the viewer.
         assert!(!INFORMATECH_VIEWER);
+    }
+
+    /// S-093, S-094, S-096, S-097 (Scylla 23/11): the options Chopper's B2 found unlocked are overwritten in every
+    /// process, `--option` refuses them, and the two compile-time switches are on.
+    #[test]
+    fn informatech_b2_options_locked() {
+        apply_informatech_defaults();
+        assert_eq!(Config::get_option(keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK), "N");
+        assert_eq!(Config::get_option(keys::OPTION_API_SERVER), "");
+        assert_eq!(Config::get_option(keys::OPTION_ENABLE_LAN_DISCOVERY), "N");
+        assert_eq!(config::LocalConfig::get_option(keys::OPTION_ENABLE_WEBRTC), "N");
+        for option in [
+            keys::OPTION_ALLOW_INSECURE_TLS_FALLBACK,
+            keys::OPTION_API_SERVER,
+            keys::OPTION_ENABLE_LAN_DISCOVERY,
+            keys::OPTION_ENABLE_WEBRTC,
+            "custom-rendezvous-server",
+            "key",
+        ] {
+            assert!(informatech_option_verrouillee(option), "{option}");
+        }
+        assert!(!informatech_option_verrouillee("audio-input"));
+        assert!(INFORMATECH_REFUSE_WEBRTC && INFORMATECH_SANS_DECOUVERTE_LAN);
     }
 
     #[test]
