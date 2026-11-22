@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_hbb/mobile/widgets/informatech_barre.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -45,17 +46,27 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  test('0.x: a message from the PC never opens the chat on the Android viewer; elsewhere upstream is unchanged', () {
+    expect(informatechChatOuvrable(android: true, modeClient: true), isFalse);
+    // The phone as the controlled side (server mode) and the desktop viewer keep upstream's behaviour.
+    expect(informatechChatOuvrable(android: true, modeClient: false), isTrue);
+    expect(informatechChatOuvrable(android: false, modeClient: true), isTrue);
+  });
+
   test('duration reads mm:ss, then h:mm:ss', () {
     expect(dureeSession(const Duration(minutes: 12, seconds: 4)), '12:04');
     expect(dureeSession(const Duration(hours: 1, minutes: 2, seconds: 4)), '1:02:04');
     expect(dureeSession(const Duration(seconds: -3)), '00:00');
   });
 
-  testWidgets('D10 tools: mouse, keyboard, Ctrl Alt Suppr, chat; no file transfer, no screen button with one screen', (t) async {
+  testWidgets('D10 tools: mouse, keyboard, Ctrl Alt Suppr; no chat in 0.x, no file transfer, no screen button with one screen', (t) async {
     await t.pumpWidget(_barre(confirme: false));
-    for (final l in ['Souris', 'Clavier', 'Ctrl Alt Suppr', 'Discussion']) {
+    for (final l in ['Souris', 'Clavier', 'Ctrl Alt Suppr']) {
       expect(find.text(l), findsOneWidget);
     }
+    // Adrien 22/11: the raw OPMD chat is hidden in 0.x (kInformatechDiscussion).
+    expect(kInformatechDiscussion, isFalse);
+    expect(find.text('Discussion'), findsNothing);
     expect(find.textContaining('Écran'), findsNothing);
     expect(find.textContaining('ichier'), findsNothing);
     await t.pumpWidget(_barre(confirme: false, ecrans: 2));

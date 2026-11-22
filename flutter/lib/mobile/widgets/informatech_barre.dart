@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../informatech_charte.dart';
@@ -256,7 +257,9 @@ class BarreBas extends StatelessWidget {
           libelle: TextesBarre.ctrlAltSuppr,
           petit: true,
           onTap: clavierPermis ? onCtrlAltSuppr : null),
-      _Outil(icone: _icone('message-square', Charte.texte), libelle: TextesBarre.discussion, onTap: onDiscussion),
+      // Hidden in 0.x (kInformatechDiscussion, Adrien 22/11): back in the Hub banner after V1.
+      if (kInformatechDiscussion)
+        _Outil(icone: _icone('message-square', Charte.texte), libelle: TextesBarre.discussion, onTap: onDiscussion),
     ];
   }
 
