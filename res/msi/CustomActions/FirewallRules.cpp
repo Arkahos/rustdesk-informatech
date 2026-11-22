@@ -68,7 +68,7 @@ bool AddFirewallRule(bool add, LPWSTR exeName, LPWSTR exeFile)
     if (add) {
         // Add firewall rule with EdgeTraversalOption=DeferApp (Windows7+) if available 
         //   else add with Edge=True (Vista and Server 2008).
-        hr = AddFirewallRuleWithEdgeTraversal(pNetFwPolicy2, true, exeName, exeFile);
+        // InformaTech (S-095, Scylla 23/11): outbound only, no inbound rule (the engine listens on nothing reachable).
         hr = AddFirewallRuleWithEdgeTraversal(pNetFwPolicy2, false, exeName, exeFile);
     }
     else {

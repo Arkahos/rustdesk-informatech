@@ -1559,6 +1559,9 @@ fn get_after_install(
         })
         .unwrap_or_default();
 
+    // InformaTech (S-095, Scylla 23/11): no inbound rule. The engine listens on nothing a remote host must reach (no
+    // direct server, no LAN discovery since S-096); sessions go out to OPMD's server and its relay. The inbound rule an
+    // earlier version created is removed on upgrade (`delete … dir=in`), the outbound one stays.
     // InformaTech (Scylla 17/11): no file association. The `.{ext}` key stays (it only stores the install choices
     // above and the icon), but no `shell\open\command`: a double-clicked file must never start the engine with
     // `--play` (this build records nothing and refuses `--play`). One left by an earlier version is removed, like the
@@ -1574,7 +1577,7 @@ fn get_after_install(
     reg delete HKEY_CLASSES_ROOT\\.{ext}\\shell /f
     reg delete HKEY_CLASSES_ROOT\\{ext} /f
     netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=out action=allow program=\"{exe}\" enable=yes
-    netsh advfirewall firewall add rule name=\"{app_name} Service\" dir=in action=allow program=\"{exe}\" enable=yes
+    netsh advfirewall firewall delete rule name=\"{app_name} Service\" dir=in
     {create_service}
     reg add HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /f /v SoftwareSASGeneration /t REG_DWORD /d 1
     ", create_service=get_create_service(&exe))
@@ -4812,6 +4815,18 @@ pub(super) fn get_pids_with_first_arg_by_wmic<S1: AsRef<str>, S2: AsRef<str>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// S-095 (Scylla 23/11): neither installer opens an inbound firewall rule; the exe's script removes the one an
+    /// earlier version made. Read in the sources: running the install script in a test would change this PC.
+    #[test]
+    fn informatech_s095_no_inbound_firewall_rule() {
+        let script = include_str!("windows.rs");
+        assert!(!script.contains(concat!("dir=in action=", "allow")));
+        assert!(script.contains("netsh advfirewall firewall delete rule name=\\\"{app_name} Service\\\" dir=in"));
+        let msi = include_str!("../../res/msi/CustomActions/FirewallRules.cpp");
+        assert!(!msi.contains(concat!("AddFirewallRuleWithEdgeTraversal(pNetFwPolicy2, ", "true")));
+        assert!(msi.contains("AddFirewallRuleWithEdgeTraversal(pNetFwPolicy2, false, exeName, exeFile);"));
+    }
 
     #[test]
     fn silent_install_creates_no_shortcut() {
