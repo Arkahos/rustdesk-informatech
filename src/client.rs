@@ -2957,8 +2957,10 @@ impl LoginConfigHandler {
 
         self.id = id;
         self.conn_type = conn_type;
-        self.informatech_presse_papiers_client = conn_type == ConnType::DEFAULT_CONN
-            && crate::common::informatech_prendre_presse_papiers_client();
+        // Taken by whatever session opens first (Argos P5): a file transfer started with the switch does not leave it
+        // for a remote session opened later by hand.
+        let presse_papiers_client = crate::common::informatech_prendre_presse_papiers_client();
+        self.informatech_presse_papiers_client = conn_type == ConnType::DEFAULT_CONN && presse_papiers_client;
         let config = self.load_config();
         self.remember = !config.password.is_empty();
         self.config = config;

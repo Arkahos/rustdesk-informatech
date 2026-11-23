@@ -2346,19 +2346,27 @@ impl Connection {
     /// InformaTech (S-098, Adrien 23/11): the technician's clipboard reaches this PC as before; this PC's clipboard
     /// (text and files) reaches the technician only once the viewer asks for it, for this connection alone.
     fn informatech_appliquer_presse_papiers_client(&mut self, o: &OptionMessage) {
-        let Ok(q) = o.informatech_clipboard_to_peer.enum_value() else {
+        let Some(ouvert) = Self::informatech_valeur_presse_papiers(o.informatech_clipboard_to_peer) else {
             return;
         };
-        if q == BoolOption::NotSet {
-            return;
-        }
-        self.informatech_presse_papiers_vers_technicien = q == BoolOption::Yes;
+        self.informatech_presse_papiers_vers_technicien = ouvert;
         if let Some(s) = self.server.upgrade() {
             s.write().unwrap().subscribe(
                 super::clipboard_service::NAME,
                 self.inner.clone(),
                 self.can_sub_clipboard_service(),
             );
+        }
+    }
+
+    /// The switch's new value from the viewer's option: NotSet (or a value this build does not know) changes nothing.
+    fn informatech_valeur_presse_papiers(
+        q: hbb_common::protobuf::EnumOrUnknown<BoolOption>,
+    ) -> Option<bool> {
+        match q.enum_value() {
+            Ok(BoolOption::Yes) => Some(true),
+            Ok(BoolOption::No) => Some(false),
+            _ => None,
         }
     }
 
@@ -8042,6 +8050,23 @@ mod test {
         let options = place("async fn update_options(&mut self, o: &OptionMessage) {");
         let appel = place("self.informatech_appliquer_presse_papiers_client(o);");
         assert!(options < appel);
+        // Argos P4: the switch's value is the viewer's, and a change resubscribes the text clipboard service.
+        let applique = place("fn informatech_appliquer_presse_papiers_client(");
+        let valeur = place("self.informatech_presse_papiers_vers_technicien = ouvert;");
+        let suivante = place("fn informatech_valeur_presse_papiers(");
+        let corps = &src[valeur..suivante];
+        assert!(corps.contains("super::clipboard_service::NAME") && corps.contains("self.can_sub_clipboard_service()"));
+        assert!(applique < valeur);
+    }
+
+    /// Argos P4: switching off closes the client -> technician direction; NotSet leaves it as it is.
+    #[test]
+    fn informatech_s098_switch_value() {
+        let v = |b: BoolOption| Connection::informatech_valeur_presse_papiers(b.into());
+        assert_eq!(v(BoolOption::Yes), Some(true));
+        assert_eq!(v(BoolOption::No), Some(false));
+        assert_eq!(v(BoolOption::NotSet), None);
+        assert_eq!(Connection::informatech_valeur_presse_papiers(hbb_common::protobuf::EnumOrUnknown::from_i32(7)), None);
     }
 
     #[test]
