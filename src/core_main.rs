@@ -838,6 +838,7 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     let mut param_array = vec![];
     // InformaTech (S-078): the password read from stdin, kept apart from what the arguments give.
     let mut secret: Option<String> = None;
+    let mut presse_papiers_client = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--connect" | "--play" | "--file-transfer" | "--view-camera" | "--port-forward"
@@ -865,6 +866,10 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
             }
             "--relay" => {
                 param_array.push(format!("relay=true"));
+            }
+            crate::common::INFORMATECH_ARG_PRESSE_PAPIERS_CLIENT => {
+                crate::common::informatech_deposer_presse_papiers_client();
+                presse_papiers_client = true;
             }
             // inner
             "--switch_uuid" => {
@@ -919,7 +924,13 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
             (WM_USER + 2) as _, // referred from unilinks desktop pub
             uni_links.as_str(),
         ) {
-            crate::platform::InformatechEnvoi::Envoye => None,
+            crate::platform::InformatechEnvoi::Envoye => {
+                if presse_papiers_client {
+                    println!("{}", crate::common::INFORMATECH_PRESSE_PAPIERS_IGNORE);
+                    std::process::exit(3);
+                }
+                None
+            }
             crate::platform::InformatechEnvoi::PasDeFenetre => Some(Vec::new()),
             crate::platform::InformatechEnvoi::Etrangere => {
                 log::warn!("informatech: a window of our name belongs to another program, the link was not sent");

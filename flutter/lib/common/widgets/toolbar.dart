@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/informatech_presse_papiers.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/common/widgets/login.dart';
@@ -954,6 +955,24 @@ Future<List<TToggleMenu>> toolbarDisplayToggle(
               }
             : null,
         child: Text(translate('Disable clipboard'))));
+  }
+  // InformaTech (S-098, Adrien 23/11): the client's clipboard reaches the technician only when switched on, for this
+  // session alone.
+  if (isDefaultConn && ffiModel.keyboard && perms['clipboard'] != false) {
+    final enabled = !ffiModel.viewOnly;
+    final value = bind.sessionGetToggleOptionSync(
+        sessionId: sessionId, arg: kInformatechOptionPressePapiersClient);
+    v.add(TToggleMenu(
+        value: value && enabled,
+        onChanged: enabled
+            ? (value) {
+                if (value == null) return;
+                bind.sessionToggleOption(
+                    sessionId: sessionId,
+                    value: kInformatechOptionPressePapiersClient);
+              }
+            : null,
+        child: Text(kInformatechPressePapiersClient)));
   }
   // lock after session end
   if (isDefaultConn && ffiModel.keyboard && !ffiModel.isPeerAndroid) {

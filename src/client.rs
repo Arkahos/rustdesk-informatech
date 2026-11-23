@@ -2885,6 +2885,8 @@ pub struct LoginConfigHandler {
     pub enable_trusted_devices: bool,
     pub record_state: bool,
     pub record_permission: bool,
+    /// S-098: this session lets the peer's clipboard reach this viewer. Never saved: every session starts without it.
+    informatech_presse_papiers_client: bool,
 }
 
 impl Deref for LoginConfigHandler {
@@ -2955,6 +2957,8 @@ impl LoginConfigHandler {
 
         self.id = id;
         self.conn_type = conn_type;
+        self.informatech_presse_papiers_client = conn_type == ConnType::DEFAULT_CONN
+            && crate::common::informatech_prendre_presse_papiers_client();
         let config = self.load_config();
         self.remember = !config.password.is_empty();
         self.config = config;
@@ -3199,6 +3203,9 @@ impl LoginConfigHandler {
     // `toggle_option()` is only called in a session.
     // Custom client advanced settings will not effect this function.
     pub fn toggle_option(&mut self, name: String) -> Option<Message> {
+        if name == crate::common::INFORMATECH_OPTION_PRESSE_PAPIERS_CLIENT {
+            return self.informatech_basculer_presse_papiers_client();
+        }
         let mut option = OptionMessage::default();
         let mut config = self.load_config();
         if name == "show-remote-cursor" {
@@ -3347,6 +3354,23 @@ impl LoginConfigHandler {
         Some(msg_out)
     }
 
+    /// S-098 (Adrien 23/11): the toolbar switch for the peer's clipboard, kept in memory for this session only.
+    fn informatech_basculer_presse_papiers_client(&mut self) -> Option<Message> {
+        self.informatech_presse_papiers_client = !self.informatech_presse_papiers_client;
+        let mut option = OptionMessage::default();
+        option.informatech_clipboard_to_peer = (if self.informatech_presse_papiers_client {
+            BoolOption::Yes
+        } else {
+            BoolOption::No
+        })
+        .into();
+        let mut misc = Misc::new();
+        misc.set_option(option);
+        let mut msg_out = Message::new();
+        msg_out.set_misc(misc);
+        Some(msg_out)
+    }
+
     /// Get [`PeerConfig`] of the current [`LoginConfigHandler`].
     ///
     /// # Arguments
@@ -3434,6 +3458,9 @@ impl LoginConfigHandler {
         if view_only || self.get_toggle_option("disable-clipboard") {
             msg.disable_clipboard = BoolOption::Yes.into();
         }
+        if self.informatech_presse_papiers_client {
+            msg.informatech_clipboard_to_peer = BoolOption::Yes.into();
+        }
         msg.supported_decoding = MessageField::some(self.get_supported_decoding());
         Some(msg)
     }
@@ -3480,6 +3507,9 @@ impl LoginConfigHandler {
     // `get_toggle_option()` is only called in a session.
     // Custom client advanced settings will not effect this function.
     pub fn get_toggle_option(&self, name: &str) -> bool {
+        if name == crate::common::INFORMATECH_OPTION_PRESSE_PAPIERS_CLIENT {
+            return self.informatech_presse_papiers_client;
+        }
         if name == "show-remote-cursor" {
             self.config.show_remote_cursor.v
         } else if name == "lock-after-session-end" {

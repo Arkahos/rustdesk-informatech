@@ -2572,6 +2572,24 @@ pub(crate) fn informatech_prendre_secret_connexion() -> Option<String> {
     INFORMATECH_SECRET_CONNEXION.lock().unwrap().take()
 }
 
+/// S-098 (Adrien 23/11): `--connect <id> --clipboard-from-client` opens the session with the client's clipboard
+/// reaching the technician, as the toolbar switch does, so a script can prove it. Only the first remote session this
+/// process opens takes it.
+pub(crate) const INFORMATECH_ARG_PRESSE_PAPIERS_CLIENT: &str = "--clipboard-from-client";
+pub(crate) const INFORMATECH_OPTION_PRESSE_PAPIERS_CLIENT: &str = "informatech-clipboard-from-client";
+pub(crate) const INFORMATECH_PRESSE_PAPIERS_IGNORE: &str =
+    "ignored: --clipboard-from-client needs a new viewer; a viewer window was already open, the session runs without it";
+static INFORMATECH_PRESSE_PAPIERS_CLIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn informatech_deposer_presse_papiers_client() {
+    INFORMATECH_PRESSE_PAPIERS_CLIENT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Taken once: the second call gets false.
+pub(crate) fn informatech_prendre_presse_papiers_client() -> bool {
+    INFORMATECH_PRESSE_PAPIERS_CLIENT.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 pub(crate) const INFORMATECH_REFUS_MOT_DE_PASSE_ARGV: &str =
     "refused: the password is never given on the command line; use --password-stdin or --password-random";
 
@@ -3647,6 +3665,14 @@ mod tests {
             *config::OVERWRITE_LOCAL_SETTINGS.write().unwrap_or_else(|e| e.into_inner()) =
                 std::mem::take(&mut self.forces_local);
         }
+    }
+
+    /// S-098: the command-line switch reaches one session only.
+    #[test]
+    fn informatech_s098_clipboard_switch_taken_once() {
+        informatech_deposer_presse_papiers_client();
+        assert!(informatech_prendre_presse_papiers_client());
+        assert!(!informatech_prendre_presse_papiers_client());
     }
 
     /// Argos P4 (23/11): the two runtime guards of S-094 and S-096 are where they act. The WebRTC answer is decided by

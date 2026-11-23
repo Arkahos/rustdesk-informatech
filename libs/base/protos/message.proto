@@ -695,6 +695,8 @@ message OptionMessage {
   BoolOption disable_camera = 17;
   BoolOption terminal_persistent = 18;
   BoolOption show_my_cursor = 19;
+  // InformaTech (S-098): the controlled side's clipboard reaches the viewer only while this is Yes.
+  BoolOption informatech_clipboard_to_peer = 1001;
 }
 
 message TestDelay {

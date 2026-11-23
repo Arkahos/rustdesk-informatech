@@ -396,6 +396,7 @@ pub struct Connection {
     show_my_cursor: bool,
     // by peer
     disable_clipboard: bool,
+    informatech_presse_papiers_vers_technicien: bool,
     // by peer
     disable_audio: bool,
     // by peer
@@ -609,6 +610,7 @@ impl Connection {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             enable_file_transfer: false,
             disable_clipboard: false,
+            informatech_presse_papiers_vers_technicien: false,
             disable_keyboard: false,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             show_my_cursor: false,
@@ -2338,6 +2340,26 @@ impl Connection {
         self.clipboard_enabled()
             && self.peer_keyboard_enabled()
             && crate::get_builtin_option(keys::OPTION_ONE_WAY_CLIPBOARD_REDIRECTION) != "Y"
+            && self.informatech_presse_papiers_vers_technicien
+    }
+
+    /// InformaTech (S-098, Adrien 23/11): the technician's clipboard reaches this PC as before; this PC's clipboard
+    /// (text and files) reaches the technician only once the viewer asks for it, for this connection alone.
+    fn informatech_appliquer_presse_papiers_client(&mut self, o: &OptionMessage) {
+        let Ok(q) = o.informatech_clipboard_to_peer.enum_value() else {
+            return;
+        };
+        if q == BoolOption::NotSet {
+            return;
+        }
+        self.informatech_presse_papiers_vers_technicien = q == BoolOption::Yes;
+        if let Some(s) = self.server.upgrade() {
+            s.write().unwrap().subscribe(
+                super::clipboard_service::NAME,
+                self.inner.clone(),
+                self.can_sub_clipboard_service(),
+            );
+        }
     }
 
     fn audio_enabled(&self) -> bool {
@@ -3442,6 +3464,8 @@ impl Connection {
                         && crate::get_builtin_option(keys::OPTION_ONE_WAY_FILE_TRANSFER) == "Y"
                     {
                         // One-way file transfer: never serve this side's clipboard files to the peer.
+                    } else if is_file_data_request(&clip) && !self.informatech_presse_papiers_vers_technicien {
+                        // InformaTech (S-098): files copied on this side follow its text clipboard.
                     } else if let Some(clip) = msg_2_clip(clip) {
                         // InformaTech (A9-2): on Windows the --cm process serves file copy and paste; with file
                         // transfer refused the peer's clipboard files never reach it, whatever its switch says.
@@ -5035,6 +5059,7 @@ impl Connection {
                 }
             }
         }
+        self.informatech_appliquer_presse_papiers_client(o);
         if let Ok(q) = o.disable_keyboard.enum_value() {
             if q != BoolOption::NotSet {
                 self.disable_keyboard = q == BoolOption::Yes;
@@ -5961,6 +5986,7 @@ impl Connection {
             && Self::is_bool_option_not_set(option.block_input)
             && Self::is_bool_option_not_set(option.disable_audio)
             && Self::is_bool_option_not_set(option.disable_clipboard)
+            && Self::is_bool_option_not_set(option.informatech_clipboard_to_peer)
             && Self::is_bool_option_not_set(option.enable_file_transfer)
             && Self::is_bool_option_not_set(option.disable_keyboard)
             && Self::is_bool_option_not_set(option.follow_remote_cursor)
@@ -6103,6 +6129,7 @@ impl Connection {
             && Self::is_bool_option_not_set(option.privacy_mode)
             && Self::is_bool_option_not_set(option.block_input)
             && Self::is_bool_option_not_set(option.disable_clipboard)
+            && Self::is_bool_option_not_set(option.informatech_clipboard_to_peer)
             && Self::is_bool_option_not_set(option.enable_file_transfer)
             && Self::is_bool_option_not_set(option.disable_keyboard)
             && Self::is_bool_option_not_set(option.follow_remote_cursor)
@@ -6123,6 +6150,7 @@ impl Connection {
             || !Self::is_bool_option_not_set(option.block_input)
             || !Self::is_bool_option_not_set(option.disable_audio)
             || !Self::is_bool_option_not_set(option.disable_clipboard)
+            || !Self::is_bool_option_not_set(option.informatech_clipboard_to_peer)
             || !Self::is_bool_option_not_set(option.enable_file_transfer)
             || !Self::is_bool_option_not_set(option.disable_keyboard)
             || !Self::is_bool_option_not_set(option.follow_remote_cursor)
@@ -7979,6 +8007,41 @@ mod test {
         for (conn_type, messages) in cases {
             assert_scopes(conn_type, messages);
         }
+    }
+
+    /// S-098 (Adrien 23/11): the switch for the client's clipboard is a remote-session option only; a camera or
+    /// terminal session asking for it is out of scope and gets nothing.
+    #[test]
+    fn informatech_s098_clipboard_to_peer_is_remote_only() {
+        let mut option = OptionMessage::new();
+        option.informatech_clipboard_to_peer = BoolOption::Yes.into();
+        for conn_type in [AuthConnType::ViewCamera, AuthConnType::Terminal] {
+            let (scoped, violation) = Connection::scoped_login_option(conn_type, &option);
+            assert_eq!(violation, Some("login.option"));
+            assert!(scoped.map_or(true, |s| s.informatech_clipboard_to_peer.enum_value() == Ok(BoolOption::NotSet)));
+        }
+        let (scoped, violation) = Connection::scoped_login_option(AuthConnType::Remote, &option);
+        assert_eq!(violation, None);
+        assert_eq!(scoped.unwrap().informatech_clipboard_to_peer.enum_value(), Ok(BoolOption::Yes));
+    }
+
+    /// S-098: this PC's clipboard, text (the clipboard service) and files (a data request from the viewer), reaches
+    /// the technician only through the per-connection switch, which starts off and only the viewer's option sets.
+    #[test]
+    fn informatech_s098_client_clipboard_gated_in_place() {
+        let tout = include_str!("connection.rs");
+        let src = &tout[..tout.find("#[cfg(test)]").expect("test module")];
+        let place = |quoi: &str| src.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let sub = place("fn can_sub_clipboard_service(&self) -> bool {");
+        let garde = place("            && self.informatech_presse_papiers_vers_technicien");
+        assert!(sub < garde && garde < place("fn informatech_appliquer_presse_papiers_client("));
+        assert!(src.contains("informatech_presse_papiers_vers_technicien: false,"));
+        assert_eq!(src.matches("self.informatech_presse_papiers_vers_technicien = ").count(), 1);
+        let fichiers = place("} else if is_file_data_request(&clip) && !self.informatech_presse_papiers_vers_technicien {");
+        assert!(fichiers < place("} else if let Some(clip) = msg_2_clip(clip) {"));
+        let options = place("async fn update_options(&mut self, o: &OptionMessage) {");
+        let appel = place("self.informatech_appliquer_presse_papiers_client(o);");
+        assert!(options < appel);
     }
 
     #[test]
