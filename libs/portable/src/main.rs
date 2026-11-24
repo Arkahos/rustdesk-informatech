@@ -330,6 +330,9 @@ fn main() -> Result<(), String> {
         if let Some(code) = execute(exe, args, ui, attendre) {
             std::process::exit(code);
         }
+    } else if attendre {
+        // Argos/Scylla P5 (S-098 P3): nothing could be unpacked, so a caller with arguments must not read 0.
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -421,6 +424,16 @@ mod code_de_sortie_tests {
         assert_eq!(code_de_sortie(sortie("3")), 3);
         assert_eq!(code_de_sortie(sortie("2")), 2);
         assert_eq!(code_de_sortie(sortie("0")), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn execute_waits_and_returns_the_code_only_when_asked() {
+        // Argos P5: pins the wait branch of execute itself (the mutant `if false && attendre` passed before).
+        let cmd = || PathBuf::from("cmd");
+        let arguments = || vec!["/C".to_owned(), "exit 3".to_owned()];
+        assert_eq!(execute(cmd(), arguments(), false, true), Some(3));
+        assert_eq!(execute(cmd(), arguments(), false, false), None);
     }
 
     #[test]
