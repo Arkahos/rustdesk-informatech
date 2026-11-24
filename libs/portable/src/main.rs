@@ -227,7 +227,28 @@ fn is_windows_7() -> bool {
     false
 }
 
-fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
+/// InformaTech (S-098 P3, Chopper's VM run 24/11): a caller that gives arguments (the Hub's `--connect <id>
+/// --password-stdin`, a script) reads the inner program's exit code: its start-up refusals (2) and the « ignored »
+/// clipboard flag (3) are lost if the packer leaves with 0 right after the spawn. A launch without arguments
+/// (double-click, install.exe, quick support) keeps the upstream behaviour: the packer leaves at once.
+fn attendre_la_fin(args_donnes: &[String]) -> bool {
+    !args_donnes.is_empty()
+}
+
+/// The code this packer leaves with once it has waited: the inner program's, or 1 when it could not be started,
+/// waited for, or ended without a code.
+fn code_de_sortie(enfant: std::io::Result<std::process::Child>) -> i32 {
+    match enfant.and_then(|mut e| e.wait()) {
+        Ok(statut) => statut.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("{:?}", e);
+            1
+        }
+    }
+}
+
+/// Returns the code to leave with when `attendre` is set, `None` otherwise.
+fn execute(path: PathBuf, args: Vec<String>, _ui: bool, attendre: bool) -> Option<i32> {
     println!("executing {}", path.display());
     // setup env
     let exe = std::env::current_exe().unwrap_or_default();
@@ -255,6 +276,9 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
             .stderr(Stdio::inherit());
     }
     let _child = cmd.spawn();
+    if attendre {
+        return Some(code_de_sortie(_child));
+    }
 
     #[cfg(windows)]
     if _ui {
@@ -267,6 +291,7 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
             }
         }
     }
+    None
 }
 
 fn main() -> Result<(), String> {
@@ -287,6 +312,7 @@ fn main() -> Result<(), String> {
     #[cfg(not(windows))]
     let quick_support = false;
 
+    let attendre = attendre_la_fin(&args);
     let mut ui = false;
     let reader = BinaryReader::new()?;
     if let Some(exe) = setup(
@@ -301,7 +327,9 @@ fn main() -> Result<(), String> {
         } else if quick_support {
             args = vec!["--quick_support".to_owned()];
         }
-        execute(exe, args, ui);
+        if let Some(code) = execute(exe, args, ui, attendre) {
+            std::process::exit(code);
+        }
     }
     Ok(())
 }
@@ -364,5 +392,40 @@ mod meta_tests {
         assert_eq!(resolve_within(base, "C:\\Windows\\System32\\x.dll"), None);
         assert_eq!(resolve_within(base, "."), None);
         assert_eq!(resolve_within(base, ""), None);
+    }
+}
+
+#[cfg(test)]
+mod code_de_sortie_tests {
+    use super::*;
+
+    #[test]
+    fn waits_only_when_given_arguments() {
+        assert!(!attendre_la_fin(&[]));
+        assert!(attendre_la_fin(&["--connect".to_owned(), "123456789".to_owned(), "--password-stdin".to_owned()]));
+    }
+
+    #[cfg(windows)]
+    fn sortie(code: &str) -> std::io::Result<std::process::Child> {
+        Command::new("cmd").args(["/C", &format!("exit {code}")]).stdout(Stdio::null()).spawn()
+    }
+
+    #[cfg(not(windows))]
+    fn sortie(code: &str) -> std::io::Result<std::process::Child> {
+        Command::new("sh").args(["-c", &format!("exit {code}")]).spawn()
+    }
+
+    #[test]
+    fn passes_the_inner_exit_code_through() {
+        // 3 = « ignored: --clipboard-from-client needs a new viewer » (S-098 point 2b), 2 = a start-up refusal.
+        assert_eq!(code_de_sortie(sortie("3")), 3);
+        assert_eq!(code_de_sortie(sortie("2")), 2);
+        assert_eq!(code_de_sortie(sortie("0")), 0);
+    }
+
+    #[test]
+    fn a_program_that_cannot_start_gives_1() {
+        let absent = Command::new(r"C:\nonexistent-informatech\absent.exe").spawn();
+        assert_eq!(code_de_sortie(absent), 1);
     }
 }
