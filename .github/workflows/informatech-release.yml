@@ -81,7 +81,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG_NAME\") | .id")
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == $ENV.TAG_NAME) | .id')
           if [ -n "$ids" ]; then
             echo "::error::A release already exists for $TAG_NAME (id $ids): never overwritten. Use a new tag opmd-v0.1.N."
             exit 1
@@ -268,7 +268,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG_NAME\") | .id")
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == $ENV.TAG_NAME) | .id')
           if [ -n "$ids" ]; then
             echo "::error::A release already exists for $TAG_NAME (id $ids): never overwritten. Use a new tag opmd-v0.1.N."
             exit 1
