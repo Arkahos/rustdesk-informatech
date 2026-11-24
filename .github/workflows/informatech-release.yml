@@ -72,6 +72,21 @@ jobs:
           if [[ "$ref" == opmd-v* ]]; then v="${ref#opmd-v}"; else v="0.0.0-dev"; fi
           echo "OPMD_VERSION=$v" >> "$GITHUB_ENV"
 
+      # S-103 (Scylla 24/11): the opmd-v0.1.3 asset Chopper had tested was replaced by this workflow's own build of
+      # the tag (action-gh-release overwrites a same-name asset). A release that already exists for the tag, draft
+      # or not, is never touched: the job fails and the published files stay as they are. Any error fails too.
+      - name: No release yet for this tag (S-103)
+        if: startsWith(github.ref, 'refs/tags/opmd-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG_NAME\") | .id")
+          if [ -n "$ids" ]; then
+            echo "::error::A release already exists for $TAG_NAME (id $ids): never overwritten. Use a new tag opmd-v0.1.N."
+            exit 1
+          fi
+
       - name: Checkout source code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -246,7 +261,23 @@ jobs:
           sha256sum ./SignOutput/* | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      # S-103: a release made by hand during the build is not overwritten either.
+      - name: Still no release for this tag (S-103, checked again after the build)
+        if: startsWith(github.ref, 'refs/tags/opmd-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG_NAME\") | .id")
+          if [ -n "$ids" ]; then
+            echo "::error::A release already exists for $TAG_NAME (id $ids): never overwritten. Use a new tag opmd-v0.1.N."
+            exit 1
+          fi
+
+      # Only a tag publishes: a manual run on a branch builds and stops here (it would create a release, and a
+      # tag, named after the branch).
       - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/opmd-v')
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           prerelease: true
