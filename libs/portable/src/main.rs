@@ -185,12 +185,29 @@ fn setup(
     for file in reader.files.iter() {
         file.write_to_file(&dir);
     }
+    if let Some(perime) = fichier_perime(&reader.files, &dir) {
+        eprintln!("{} could not be replaced (still in use?): not starting a mix of old and new files", perime);
+        return None;
+    }
     write_meta(&dir, ts, &metadata_paths);
     #[cfg(windows)]
     win::copy_runtime_broker(&dir);
     #[cfg(linux)]
     reader.configure_permission(&dir);
     Some(dir.join(&reader.exe))
+}
+
+// write_to_file ignores write errors, so a file held open by a running copy keeps its old
+// content and the launcher would start the previous version (S-105).
+fn fichier_perime(files: &[bin_reader::BinaryData], dir: &Path) -> Option<String> {
+    files
+        .iter()
+        .find(|file| {
+            std::fs::read(dir.join(&file.path))
+                .map(|lu| format!("{:x}", md5::compute(&lu)).as_bytes() != file.md5_code)
+                .unwrap_or(true)
+        })
+        .map(|file| file.path.clone())
 }
 
 fn use_null_stdio() -> bool {
@@ -442,3 +459,32 @@ mod code_de_sortie_tests {
         assert_eq!(code_de_sortie(absent), 1);
     }
 }
+
+#[cfg(test)]
+mod fichier_perime_tests {
+    use super::*;
+
+    fn donnee(chemin: &str, contenu: &[u8]) -> bin_reader::BinaryData {
+        bin_reader::BinaryData {
+            md5_code: Box::leak(format!("{:x}", md5::compute(contenu)).into_bytes().into_boxed_slice()),
+            raw: &[],
+            path: chemin.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_file_left_from_the_previous_version_is_reported() {
+        let dir = std::env::temp_dir().join(format!("informatech-s105-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("rustdesk.exe"), b"0.1.3").unwrap();
+        std::fs::write(dir.join("librustdesk.dll"), b"0.1.2").unwrap();
+        let attendus = [donnee("rustdesk.exe", b"0.1.3"), donnee("librustdesk.dll", b"0.1.3")];
+        assert_eq!(fichier_perime(&attendus, &dir), Some("librustdesk.dll".to_owned()));
+        std::fs::write(dir.join("librustdesk.dll"), b"0.1.3").unwrap();
+        assert_eq!(fichier_perime(&attendus, &dir), None);
+        std::fs::remove_file(dir.join("rustdesk.exe")).unwrap();
+        assert_eq!(fichier_perime(&attendus, &dir), Some("rustdesk.exe".to_owned()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
