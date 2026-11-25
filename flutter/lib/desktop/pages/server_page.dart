@@ -2,6 +2,7 @@
 
 import 'package:flutter_hbb/common/informatech_discussion.dart';
 import 'package:flutter_hbb/common/informatech_permissions.dart';
+import 'package:flutter_hbb/common/informatech_presse_papiers.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -370,6 +371,7 @@ Widget buildConnectionCard(Client client) {
       key: ValueKey(client.id),
       children: [
         _CmHeader(client: client),
+        informatechAvisPressePapiersCm(client.informatechPressePapiersClient && !client.disconnected),
         client.type_() == ClientType.file ||
                 client.type_() == ClientType.portForward ||
                 client.type_() == ClientType.terminal ||

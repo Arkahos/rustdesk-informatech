@@ -2357,6 +2357,17 @@ impl Connection {
                 self.can_sub_clipboard_service(),
             );
         }
+        self.informatech_avis_presse_papiers_cm();
+    }
+
+    /// S-098b: the client's window shows the switch's current value. Also sent right after each Login to the window,
+    /// which rebuilds the client row: a password login applies the viewer's options before the window has the row.
+    fn informatech_avis_presse_papiers_cm(&mut self) {
+        let enabled = self.informatech_presse_papiers_vers_technicien;
+        self.send_to_cm(ipc::Data::SwitchPermission {
+            name: crate::common::INFORMATECH_CM_PRESSE_PAPIERS_CLIENT.to_owned(),
+            enabled,
+        });
     }
 
     /// The switch's new value from the viewer's option: NotSet (or a value this build does not know) changes nothing.
@@ -2408,6 +2419,9 @@ impl Connection {
             privacy_mode: self.privacy_mode,
             from_switch: self.from_switch,
         });
+        if self.informatech_presse_papiers_vers_technicien {
+            self.informatech_avis_presse_papiers_cm();
+        }
     }
 
     #[inline]
@@ -8057,6 +8071,28 @@ mod test {
         let corps = &src[valeur..suivante];
         assert!(corps.contains("super::clipboard_service::NAME") && corps.contains("self.can_sub_clipboard_service()"));
         assert!(applique < valeur);
+    }
+
+    /// S-098b: every value the switch takes is passed on to the client's connection manager window, which shows it.
+    #[test]
+    fn informatech_s098b_switch_reaches_the_client_window() {
+        let tout = include_str!("connection.rs");
+        let src = &tout[..tout.find("#[cfg(test)]").expect("test module")];
+        let place = |quoi: &str| src.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let valeur = place("self.informatech_presse_papiers_vers_technicien = ouvert;");
+        let avis = place("fn informatech_avis_presse_papiers_cm(&mut self) {");
+        assert!(src[valeur..avis].contains("self.informatech_avis_presse_papiers_cm();"));
+        let corps = &src[avis..place("fn informatech_valeur_presse_papiers(")];
+        assert!(corps.contains("let enabled = self.informatech_presse_papiers_vers_technicien;"));
+        assert!(corps.contains("self.send_to_cm(ipc::Data::SwitchPermission {"));
+        assert!(corps.contains("name: crate::common::INFORMATECH_CM_PRESSE_PAPIERS_CLIENT.to_owned(),"));
+        // A password login applies the options before the window gets its Login, which resets the row: resend after it.
+        let login = place("fn try_start_cm(&mut self, peer_id: String, name: String, authorized: bool) {");
+        let fin = login + src[login..].find("\n    }").expect("end of try_start_cm");
+        let corps = &src[login..fin];
+        let envoi = corps.find("self.send_to_cm(ipc::Data::Login {").expect("Login");
+        assert!(envoi < corps.find("self.informatech_avis_presse_papiers_cm();").expect("resend after Login"));
+        assert!(corps.contains("if self.informatech_presse_papiers_vers_technicien {"));
     }
 
     /// Argos P4: switching off closes the client -> technician direction; NotSet leaves it as it is.

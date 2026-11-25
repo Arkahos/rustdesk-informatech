@@ -2577,6 +2577,10 @@ pub(crate) fn informatech_prendre_secret_connexion() -> Option<String> {
 /// process opens takes it.
 pub(crate) const INFORMATECH_ARG_PRESSE_PAPIERS_CLIENT: &str = "--clipboard-from-client";
 pub(crate) const INFORMATECH_OPTION_PRESSE_PAPIERS_CLIENT: &str = "informatech-clipboard-from-client";
+/// S-098b (Adrien 23/11, « message visible »): name the connection sends to the connection manager with the
+/// per-session switch's value, so the client's window shows that the technician can copy from this PC's clipboard.
+pub(crate) const INFORMATECH_CM_PRESSE_PAPIERS_CLIENT: &str = "informatech_presse_papiers_client";
+
 pub(crate) const INFORMATECH_PRESSE_PAPIERS_IGNORE: &str =
     "ignored: --clipboard-from-client needs a new viewer; a viewer window was already open, the session runs without it";
 static INFORMATECH_PRESSE_PAPIERS_CLIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

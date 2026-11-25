@@ -533,6 +533,7 @@ class ServerModel with ChangeNotifier {
         } else {
           if (_clients[index].authorized) {
             _clients[index].privacyMode = client.privacyMode;
+            _clients[index].informatechPressePapiersClient = client.informatechPressePapiersClient;
             notifyListeners();
             return;
           }
@@ -818,6 +819,8 @@ class Client {
   bool fromSwitch = false;
   bool inVoiceCall = false;
   bool incomingVoiceCall = false;
+  // InformaTech S-098b: the technician may copy from this PC's clipboard during this session.
+  bool informatechPressePapiersClient = false;
 
   RxInt unreadChatMessageCount = 0.obs;
 
@@ -847,6 +850,7 @@ class Client {
     fromSwitch = json['from_switch'];
     inVoiceCall = json['in_voice_call'];
     incomingVoiceCall = json['incoming_voice_call'];
+    informatechPressePapiersClient = json['informatech_presse_papiers_client'] ?? false;
   }
 
   Map<String, dynamic> toJson() {
@@ -872,6 +876,7 @@ class Client {
     data['from_switch'] = fromSwitch;
     data['in_voice_call'] = inVoiceCall;
     data['incoming_voice_call'] = incomingVoiceCall;
+    data['informatech_presse_papiers_client'] = informatechPressePapiersClient;
     return data;
   }
 

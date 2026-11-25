@@ -149,9 +149,24 @@ pub struct Client {
     pub from_switch: bool,
     pub in_voice_call: bool,
     pub incoming_voice_call: bool,
+    /// S-098b: the technician may copy from this PC's clipboard during this session.
+    #[serde(default)]
+    pub informatech_presse_papiers_client: bool,
     #[serde(skip)]
     #[cfg(not(any(target_os = "ios")))]
     tx: UnboundedSender<Data>,
+}
+
+/// S-098b: redraws the client row with the clipboard switch's value (same path as the privacy mode fallback).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn informatech_avis_presse_papiers<T: InvokeUiCM>(cm: &ConnectionManager<T>, conn_id: i32, enabled: bool) {
+    let client = CLIENTS.write().unwrap().get_mut(&conn_id).map(|c| {
+        c.informatech_presse_papiers_client = enabled;
+        c.clone()
+    });
+    if let Some(client) = client {
+        cm.ui_handler.add_connection(&client);
+    }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -261,6 +276,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
             tx,
             in_voice_call: false,
             incoming_voice_call: false,
+            informatech_presse_papiers_client: false,
         };
         CLIENTS
             .write()
@@ -587,6 +603,11 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                 }
                                 Data::ChatMessage { text } => {
                                     self.cm.new_message(self.conn_id, text);
+                                }
+                                Data::SwitchPermission { name, enabled }
+                                    if name == crate::common::INFORMATECH_CM_PRESSE_PAPIERS_CLIENT =>
+                                {
+                                    informatech_avis_presse_papiers(&self.cm, self.conn_id, enabled);
                                 }
                                 Data::SwitchPermission { name, enabled } => {
                                     // Keep this branch scoped to privacy mode rollback.
