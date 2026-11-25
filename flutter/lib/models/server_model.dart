@@ -539,11 +539,13 @@ class ServerModel with ChangeNotifier {
           }
           _clients[index].authorized = true;
           _clients[index].privacyMode = client.privacyMode;
+          _clients[index].informatechPressePapiersClient = client.informatechPressePapiersClient;
         }
       } else {
         final index = _clients.indexWhere((c) => c.id == client.id);
         if (index >= 0) {
           _clients[index].privacyMode = client.privacyMode;
+          _clients[index].informatechPressePapiersClient = client.informatechPressePapiersClient;
           notifyListeners();
           return;
         }

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/informatech_presse_papiers.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -39,5 +41,19 @@ void main() {
     expect(Client.fromJson(_client(pressePapiers: true)).informatechPressePapiersClient, isTrue);
     expect(Client.fromJson(_client()).informatechPressePapiersClient, isFalse);
     expect(Client.fromJson(_client(pressePapiers: true)).toJson()['informatech_presse_papiers_client'], isTrue);
+  });
+
+  // ServerModel needs the engine, so the update of an existing row (the switch turned on mid-session) is pinned in place.
+  test('S-098b: every addConnection branch that updates an existing row carries the switch', () {
+    final source = File('lib/models/server_model.dart').readAsStringSync().replaceAll('\r\n', '\n');
+    final debut = source.indexOf('void addConnection(Map<String, dynamic> evt) {');
+    final fin = source.indexOf('_addTab(client);', debut);
+    expect(debut, greaterThan(0));
+    final corps = source.substring(debut, fin);
+    const copie = '_clients[index].informatechPressePapiersClient = client.informatechPressePapiersClient;';
+    expect('_clients[index].privacyMode = client.privacyMode;'.allMatches(corps).length, 3);
+    expect(copie.allMatches(corps).length, 3);
+    final ligne = RegExp(r'_clients\[index\]\.privacyMode = client\.privacyMode;\n\s*' + RegExp.escape(copie));
+    expect(ligne.allMatches(corps).length, 3);
   });
 }

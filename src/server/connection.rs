@@ -8093,6 +8093,16 @@ mod test {
         let envoi = corps.find("self.send_to_cm(ipc::Data::Login {").expect("Login");
         assert!(envoi < corps.find("self.informatech_avis_presse_papiers_cm();").expect("resend after Login"));
         assert!(corps.contains("if self.informatech_presse_papiers_vers_technicien {"));
+        // Window side: the named switch is caught before the generic arm and stored on the row that is redrawn.
+        let cm = include_str!("../ui_cm_interface.rs");
+        let place_cm = |quoi: &str| cm.find(quoi).unwrap_or_else(|| panic!("not found: {quoi}"));
+        let bras = place_cm("if name == crate::common::INFORMATECH_CM_PRESSE_PAPIERS_CLIENT =>");
+        assert!(bras < place_cm("informatech_avis_presse_papiers(&self.cm, self.conn_id, enabled);"));
+        assert!(bras < place_cm("// Keep this branch scoped to privacy mode rollback."));
+        let avis = place_cm("fn informatech_avis_presse_papiers<T: InvokeUiCM>(");
+        let stocke = place_cm("c.informatech_presse_papiers_client = enabled;");
+        let redessine = avis + cm[avis..].find("cm.ui_handler.add_connection(&client);").expect("redraw");
+        assert!(avis < stocke && stocke < redessine);
     }
 
     /// Argos P4: switching off closes the client -> technician direction; NotSet leaves it as it is.
